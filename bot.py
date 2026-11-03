@@ -5,6 +5,7 @@ import json
 import urllib.request
 from datetime import datetime
 import zoneinfo
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -17,10 +18,9 @@ from aiogram.types import (
 )
 import google.generativeai as genai
 
-# --- НАСТРОЙКИ И КОНФИгурация ---
+# --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
 BOT_TOKEN = "9229154481:AAGg7fO1bxkH8dJzzygMFlnYIH3osyHruyY"
 
-# Прячем ключ от сканера GitHub с помощью склейки:
 part1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
 part2 = "ULvzAlSD5fm7rm-HbHlQvkQAQ"
 GEMINI_API_KEY = part1 + part2
@@ -35,7 +35,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 
-# Каталог платных товаров
 PRODUCTS = {
     "ordinary": {"name": "🎯 Ординар дня (Кэф 1.8+)", "price_kz": 1500, "stars": 50},
     "express": {"name": "🔥 Уверенный экспресс (Кэф 2.5-3.0)", "price_kz": 2500, "stars": 80},
@@ -43,7 +42,6 @@ PRODUCTS = {
     "vip_7": {"name": "👑 VIP-Подписка (Сливы на 7 дней)", "price_kz": 5000, "stars": 160},
 }
 
-# Системный промпт для аналитиков команды
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик аналитического отдела BetMarket KZ. 
 Твоя задача — отобрать наиболее надежные исходы (ординар или экспресс с кэфом 2.0-3.0) с минимальным риском и обоснованной логикой.
@@ -84,12 +82,9 @@ async def ask_gemini_prediction(prompt_text: str) -> str:
     except Exception as e:
         return f"⚠️ Ошибка формирования прогноза: {e}"
 
-# --- КЛАВИАТУРЫ ---
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🎁 Бесплатный прогноз от BetMarket", callback_data="team_free_pick")
-        ],
+        [InlineKeyboardButton(text="🎁 Бесплатный прогноз от BetMarket", callback_data="team_free_pick")],
         [
             InlineKeyboardButton(text="🎯 Ординар (1 500 ₸)", callback_data="item_ordinary"),
             InlineKeyboardButton(text="🔥 Экспресс 2-3 (2 500 ₸)", callback_data="item_express")
@@ -102,9 +97,7 @@ def main_keyboard():
             InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile"),
             InlineKeyboardButton(text="📊 Статистика / ROI", callback_data="stats")
         ],
-        [
-            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/your_support")
-        ]
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/your_support")]
     ])
 
 def payment_methods_keyboard(item_code: str):
@@ -114,8 +107,6 @@ def payment_methods_keyboard(item_code: str):
         [InlineKeyboardButton(text=f"⭐ Оплатить Telegram Stars ({item['stars']} ⭐)", callback_data=f"pay_stars_{item_code}")],
         [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")]
     ])
-
-# --- ХЭНДЛЕРЫ ---
 
 @router.message(CommandStart())
 async def start_cmd(message: Message):
@@ -134,7 +125,6 @@ async def back_to_main(call: CallbackQuery):
         parse_mode="Markdown"
     )
 
-# БЕСПЛАТНЫЙ ПРОГНОЗ ОТ КОМАНДЫ
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
     await call.message.edit_text("⏳ *Аналитический отдел BetMarket отбирает лучшие матчи на сегодня...*", parse_mode="Markdown")
@@ -143,13 +133,11 @@ async def team_free_pick_handler(call: CallbackQuery):
     prompt = f"Вот список доступных матчей на сегодня:\n{matches}\n\nПодготовь качественный бесплатный прогноз от команды BetMarket (1 уверенный ординар или аккуратный экспресс с кэфом до 2.0) с коротким обоснованием."
     
     result = await ask_gemini_prediction(prompt)
-    
     report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ ОТ КОМАНДЫ BETMARKET**\n\n{result}"
     
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В главное меню", callback_data="main_menu")]])
     await call.message.edit_text(report, reply_markup=back_kb, parse_mode="Markdown")
 
-# Выбор платного товара
 @router.callback_query(F.data.startswith("item_"))
 async def select_item(call: CallbackQuery):
     item_code = call.data.replace("item_", "")
@@ -165,7 +153,6 @@ async def select_item(call: CallbackQuery):
     )
     await call.message.edit_text(text, reply_markup=payment_methods_keyboard(item_code), parse_mode="Markdown")
 
-# Оплата Kaspi
 @router.callback_query(F.data.startswith("pay_kaspi_"))
 async def pay_kaspi(call: CallbackQuery):
     item_code = call.data.replace("pay_kaspi_", "")
@@ -182,7 +169,6 @@ async def pay_kaspi(call: CallbackQuery):
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"item_{item_code}")]])
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
 
-# Оплата Telegram Stars
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     item_code = call.data.replace("pay_stars_", "")
@@ -221,11 +207,28 @@ async def stats_handler(call: CallbackQuery):
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]])
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
 
-# --- ЗАПУСК ---
+# --- ВЕБ-СЕРВЕР ДЛЯ УДЕРЖАНИЯ ПОРТА RENDER ---
+async def handle(request):
+    return web.Response(text="BetMarket KZ Bot is running!")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render передает порт через переменные окружения, по умолчанию берем 10000
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 async def main():
     dp.include_router(router)
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("🚀 Бот BetMarket KZ успешно запущен!")
+    
+    # Запускаем и веб-сервер, и Telegram бота одновременно
+    await web_server()
+    logging.info("🚀 Бот и веб-сервер BetMarket KZ успешно запущены!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
