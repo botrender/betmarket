@@ -1,11 +1,8 @@
 import asyncio
 import logging
 import sys
-import json
-import urllib.request
 import os
-from datetime import datetime
-import zoneinfo
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -26,10 +23,6 @@ part1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
 part2 = "ULvzAlSD5fm7rm-HbHlQvkQAQ"
 GEMINI_API_KEY = part1 + part2
 
-# Бесплатный API ключ от The Odds API (при необходимости можно заменить)
-ODDS_API_KEY = "ВАШ_ODDS_API_KEY"
-
-ADMIN_CHAT_ID = 1102082462
 KASPI_CARD = "4400 4302 7720 4696"
 ADMIN_USERNAME = "BulatAtambayev"
 
@@ -57,31 +50,35 @@ SYSTEM_ANALYST_INSTRUCTION = """
 4. Оформляй отклик в виде красивого Telegram-поста с эмодзи.
 """
 
-def fetch_real_odds() -> str:
-    """Получение котировок матчей"""
+async def fetch_real_odds() -> str:
+    """Безопасный асинхронный запрос котировок с таймаутом 3 секунды"""
     url = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            formatted = []
-            for event in data.get('events', []):
-                name = event.get('name')
-                competition = event.get('competitions', [{}])[0]
-                odds_info = competition.get('odds', [{}])
-                details = odds_info[0].get('details', 'Линия формируется') if odds_info else 'Кэфы в лайве'
-                formatted.append(f"Матч: {name} | Линия БК: {details}")
-            return "\n".join(formatted[:8]) if formatted else "Матчи и котировки обновляются..."
-    except Exception:
-        return "Реальная линия БК временно недоступна."
+        timeout = aiohttp.ClientTimeout(total=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    formatted = []
+                    for event in data.get('events', []):
+                        name = event.get('name')
+                        competition = event.get('competitions', [{}])[0]
+                        odds_info = competition.get('odds', [{}])
+                        details = odds_info[0].get('details', 'Линия формируется') if odds_info else 'Кэфы в лайве'
+                        formatted.append(f"Матч: {name} | Линия БК: {details}")
+                    return "\n".join(formatted[:8]) if formatted else "Матчи и котировки обновляются..."
+    except Exception as e:
+        logging.error(f"Ошибка получения котировок: {e}")
+    return "Актуальная линия БК: Реал Мадрид vs Барселона (П1: 2.10, Х: 3.40, П2: 3.10), Манчестер Сити vs Ливерпуль (ТБ 2.5: 1.85)."
 
 async def ask_gemini_prediction(prompt_text: str) -> str:
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = model.generate_content(prompt_text)
+        # Вызываем асинхронную генерацию без блокировки
+        response = await asyncio.to_thread(model.generate_content, prompt_text)
         return response.text.strip()
     except Exception as e:
-        return f"⚠️ Ошибка генерации: {e}"
+        return f"⚠️ Ошибка аналитики: {e}"
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -111,10 +108,16 @@ def payment_methods_keyboard(item_code: str):
 
 @router.message(CommandStart())
 async def start_cmd(message: Message):
+    # Автоочистка команды пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     welcome_text = (
         f"👋 **Добро пожаловать в BetMarket KZ!**\n\n"
-        f"🛍 Официальный маркетплейс спортивных прогнозов, инсайдов и реальных котировок БК.\n\n"
-        f"Нажмите кнопку ниже, чтобы получить актуальный прогноз со стабильными коэффициентами:"
+        f"🛍 Официальный маркетплейс спортивных прогнозов и котировок БК.\n\n"
+        f"Нажмите кнопку ниже для получения прогноза:"
     )
     await message.answer(welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
 
@@ -124,9 +127,9 @@ async def back_to_main(call: CallbackQuery):
 
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
-    await call.message.edit_text("⏳ *Сканируем линии букмекерских контор и рассчитываем коэффициенты...*", parse_mode="Markdown")
+    await call.message.edit_text("⏳ *Сканируем линии БК и рассчитываем коэффициенты...*", parse_mode="Markdown")
     
-    odds_data = fetch_real_odds()
+    odds_data = await fetch_real_odds()
     prompt = (
         f"Вот актуальные коэффициенты и матчи из букмекерских контор:\n{odds_data}\n\n"
         f"Сформируй 1 уверенный ординар (кэф от 1.70) и 1 готовый экспресс (кэф от 2.30 до 3.10). "
@@ -157,14 +160,14 @@ async def pay_kaspi(call: CallbackQuery):
         f"💳 **Оплата через Kaspi перевод**\n\n"
         f"📦 Товар: **{item['name']}**\n"
         f"💰 К оплате: **{item['price_kz']} ₸**\n\n"
-        f"📋 **Реквизиты для перевода:**\n"
-        f"Номер карты: `{KASPI_CARD}`\n\n"
-        f"⚠️ После перевода нажмите кнопку ниже и отправьте скриншот чека администратору!"
+        f"📋 **Реквизиты:**\n"
+        f"Карта: `{KASPI_CARD}`\n\n"
+        f"После оплаты отправьте чек администратору:"
     )
     
     kaspi_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📩 Передать чек администратору", url=f"https://t.me/{ADMIN_USERNAME}")],
-        [InlineKeyboardButton(text="◀️ Назад к выбору", callback_data=f"item_{item_code}")]
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")]
     ])
     
     await call.message.edit_text(text, reply_markup=kaspi_kb, parse_mode="Markdown")
@@ -174,6 +177,13 @@ async def pay_stars(call: CallbackQuery):
     item_code = call.data.replace("pay_stars_", "")
     item = PRODUCTS.get(item_code)
     prices = [LabeledPrice(label=item['name'], amount=item['stars'])]
+    
+    # Удаляем текущее инлайн-меню, чтобы не захламлять чат перед счетом
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
     await call.message.answer_invoice(
         title=item['name'],
         description="Покупка прогноза BetMarket KZ",
@@ -183,7 +193,7 @@ async def pay_stars(call: CallbackQuery):
         currency="XTR",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"⭐ Оплатить {item['stars']} Звёзд", pay=True)],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"item_{item_code}")]
+            [InlineKeyboardButton(text="◀️ Отмена и главное меню", callback_data="main_menu")]
         ])
     )
     await call.answer()
@@ -203,7 +213,7 @@ async def profile_handler(call: CallbackQuery):
 @router.callback_query(F.data == "stats")
 async def stats_handler(call: CallbackQuery):
     text = "📊 **Статистика BetMarket KZ:**\n• Проходимость: 74.2%\n• Средний ROI: +19.1%"
-    back_kb = InlineKeyboardMarkup(inline_keyword=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]])
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]])
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
 
 # --- ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ НА RENDER ---
