@@ -20,7 +20,7 @@ from aiogram.types import (
 import google.generativeai as genai
 
 # --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
-BOT_TOKEN = "9229154481:AAGg7fO1bxkH8dJzzygMFlnYIH3osyHruyY"
+BOT_TOKEN = "9229154481:AAEQDxNsKv7mN6mH3wwMLOHuxV90h5fsjNs"
 
 part1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
 part2 = "ULvzAlSD5fm7rm-HbHlQvkQAQ"
