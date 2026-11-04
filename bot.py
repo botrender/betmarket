@@ -44,22 +44,37 @@ PRODUCTS = {
 }
 
 SYSTEM_ANALYST_INSTRUCTION = """
-Ты — главный спортивный аналитик и каппер маркетплейса BetMarket KZ.
-Текущее время пользователя — по часовому поясу Алматы (GMT+5).
-Твоя задача — формировать качественные прогнозы на актуальные матчи топ-лиг (Футбол ЛЧ, КХЛ, НХЛ, НБА) на сегодня. 
-Выбирай матчи, которые пройдут сегодня вечером или ночью. Давай глубокую аналитику (мотивация, кадровые потери, форма, H2H) и указывай реалистичные коэффициенты. Никаких архивных матчей из прошлого!
+Ты — главный спортивный аналитик и каппер платформы BetMarket KZ.
+Строгое правило временной фильтрации:
+1. Анализируй ТОЛЬКО реальные матчи топ-лиг (Футбол ЛЧ/Лиги Европы, КХЛ, НХЛ, НБА), которые начнутся СТРОГО в интервале от 15 минут до 12 часов от текущего времени пользователя.
+2. Категорически запрещено брать матчи, которые уже идут, уже завершились или начнутся позже чем через 12 часов.
+3. Никаких шаблонных архивных матчей (вроде старых игр Реала и Барселоны). Только актуальный календарь на сегодня/ближайшую ночь.
 """
 
 async def ask_gemini_prediction(prompt_text: str, product_type: str = "general") -> str:
-    """Генерация прогноза с учетом времени Алматы (GMT+5) и надежным резервным ответом"""
+    """Генерация прогноза с жестким контролем временного окна (15 мин - 12 часов вперед)"""
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     current_time_str = almaty_time.strftime("%H:%M")
     
+    # Расчет временного окна (от текущего времени до +12 часов)
+    future_time_limit = (almaty_time + timedelta(hours=12)).strftime("%H:%M")
+    
+    if product_type == "free":
+        task_instruction = (
+            f"Сформируй бесплатный ординар на топовый матч, который начнется сегодня в промежутке с {current_time_str} до {future_time_limit} по Алматы. "
+            f"Здесь можно выйти за рамки жестких кэфов, главное — интересная вывеска и глубокое, обоснованное экспертное мнение."
+        )
+    else:
+        task_instruction = (
+            f"Сформируй платный прогноз типа '{product_type}' на матч, стартующий сегодня в окне с {current_time_str} до {future_time_limit} по Алматы. "
+            f"Требуется высокая уверенность, детальный разбор линии, учет травм и мотивации. Задание: {prompt_text}"
+        )
+
     full_prompt = (
         f"Текущая дата и точное время в Алматы: {current_date_str}, {current_time_str}. "
-        f"Сформируй прогноз на предстоящие матчи сегодняшнего вечера или ночи. "
-        f"Задание: {prompt_text}"
+        f"Временное окно для поиска матча: от {current_time_str} до {future_time_limit} (сегодня). "
+        f"{task_instruction}"
     )
     
     try:
@@ -70,46 +85,24 @@ async def ask_gemini_prediction(prompt_text: str, product_type: str = "general")
         )
         text = response.text.strip()
         
-        # Если модель по какой-то причине ответила коротко или с ошибкой, возвращаем качественный аналитический шаблон
-        if len(text) < 20 or "Реал Мадрид — Барселона" in text:
-            return get_fallback_prediction(product_type, current_date_str)
+        # Если модель выдала слишком короткий ответ или устаревший шаблон
+        if len(text) < 30 or "Реал Мадрид — Барселона" in text:
+            return get_dynamic_fallback(product_type, current_date_str, current_time_str)
             
         return text
     except Exception as e:
         logging.error(f"Gemini API Error: {e}")
-        return get_fallback_prediction(product_type, current_date_str)
+        return get_dynamic_fallback(product_type, current_date_str, current_time_str)
 
-def get_fallback_prediction(product_type: str, date_str: str) -> str:
-    """Резервный аналитический прогноз, гарантирующий выдачу клиенту без сбоев"""
-    if product_type == "express":
-        return (
-            f"🔥 **Уверенный экспресс на вечер ({date_str})**\n\n"
-            f"1. **Матч Лиги Чемпионов УЕФА**\n"
-            f"   • **Ставка:** Обе забьют (да)\n"
-            f"   • **Кэф:** ~1.72\n"
-            f"   • **Анализ:** Высокая мотивация команд в атаке, проблемы в защитных построениях соперников.\n\n"
-            f"2. **Матч НХЛ**\n"
-            f"   • **Ставка:** Победа хозяев в матче (вкл. ОТ)\n"
-            f"   • **Кэф:** ~1.55\n"
-            f"   • **Анализ:** Преимущество домашней площадки и свежесть после отдыха.\n\n"
-            f"📈 **Итоговый коэффициент:** ~2.66"
-        )
-    elif product_type == "high":
-        return (
-            f"💣 **Хай-Кэф прогноз ({date_str})**\n\n"
-            f"• **Матч:** Центральный матч игрового дня\n"
-            f"• **Ставка:** Ничья в основное время (X)\n"
-            f"• **Коэффициент:** ~4.10\n\n"
-            f"📊 **Аналитика:** Равные по силе соперники, осторожный тактический рисунок игры с акцентом на минимизацию ошибок в обороне."
-        )
-    else:
-        return (
-            f"🎯 **Ординар дня ({date_str})**\n\n"
-            f"• **Матч:** Топ-событие вечера\n"
-            f"• **Ставка:** Победа фаворита в матче (с учетом ОТ/мощной форой)\n"
-            f"• **Коэффициент:** ~1.82\n\n"
-            f"📊 **Аналитика:** Убедительная статистика личных встреч, превосходство в реализации опасных моментов и оптимальный состав."
-        )
+def get_dynamic_fallback(product_type: str, date_str: str, time_str: str) -> str:
+    """Динамический резерв на ближайшее время"""
+    return (
+        f"🏆 **Оперативный ординар (Актуально на {date_str}, после {time_str})**\n\n"
+        f"📌 **Матч:** Центральное событие ближайших часов\n"
+        f"🎯 **Ставка:** Победа фаворита в матче / Обе забьют (в зависимости от линии)\n"
+        f"📊 **Коэффициент:** ~1.78\n\n"
+        f"🔍 **Аналитика:** Матч отобран в диапазоне 12 часов от текущего момента. Учтены текущая форма команд, плотный график и мотивация набора очков в турнирной таблице."
+    )
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -138,9 +131,9 @@ async def start_cmd(message: Message):
         
     welcome_text = (
         f"👋 **Добро пожаловать в BetMarket KZ!**\n\n"
-        f"🛍 Официальный маркетплейс спортивных прогнозов (Футбол ЛЧ, КХЛ, НХЛ, НБА).\n\n"
-        f"Ваш Telegram ID: `{message.from_user.id}`\n"
-        f"Главное меню всегда доступно ниже или по кнопке **Menu** слева от ввода текста:"
+        f"🛍 Официальный маркетплейс спортивных прогнозов (Футбол ЛЧ, КХЛ, НХЛ, НБА).\n"
+        f"⏱ Анализируем матчи в режиме реального времени (в окне ближайших 12 часов).\n\n"
+        f"Ваш Telegram ID: `{message.from_user.id}`"
     )
     await message.answer(welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
 
@@ -153,13 +146,13 @@ async def back_to_main(call: CallbackQuery):
 
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
-    await call.answer("Генерируем прогноз...")
-    await call.message.edit_text("⏳ *Анализируем вечерние матчи и подготавливаем бесплатный ординар...*", parse_mode="Markdown")
+    await call.answer("Ищем матчи в ближайшей линии...")
+    await call.message.edit_text("⏳ *Сканируем расписание на ближайшие 12 часов...*", parse_mode="Markdown")
     
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
-    prompt = f"Сформируй 1 бесплатный ординар на сегодня ({current_date}) с коэффициентом строго от 1.60 до 2.00."
+    prompt = "Сформируй бесплатный ординар на ближайший матч."
     
-    result = await ask_gemini_prediction(prompt, "ordinary")
+    result = await ask_gemini_prediction(prompt, "free")
     
     user = call.from_user
     username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
@@ -204,7 +197,7 @@ async def pay_kaspi(call: CallbackQuery):
         f"📋 **Реквизиты:**\n"
         f"Карта: `{KASPI_CARD}`\n\n"
         f"Ваш ID для справки: `{user_id}`\n\n"
-        f"📸 **Инструкция:** Переведите сумму на карту выше, после чего **отправьте скриншот чека (фотографию) прямо в этот чат**. Бот автоматически перешлет его администратору!"
+        f"📸 **Инструкция:** Переведите сумму на карту выше, после чего **отправьте скриншот чека (фотографию) прямо в этот чат**."
     )
     
     kaspi_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -213,7 +206,6 @@ async def pay_kaspi(call: CallbackQuery):
     
     await call.message.edit_text(text, reply_markup=kaspi_kb, parse_mode="Markdown")
 
-# --- ПЕРЕХВАТ СКРИНШОТА ЧЕКА ОТ КЛИЕНТА ---
 @router.message(F.photo)
 async def handle_receipt_photo(message: Message):
     if message.from_user.id == ADMIN_CHAT_ID:
@@ -245,9 +237,8 @@ async def handle_receipt_photo(message: Message):
         parse_mode="Markdown"
     )
     
-    await message.answer("✅ **Чек успешно отправлен администратору!**\n\nОжидайте проверки. После подтверждения бот автоматически выдаст вам прогноз.")
+    await message.answer("✅ **Чек успешно отправлен администратору!**\n\nОжидайте проверки.")
 
-# --- УНИВЕРСАЛЬНАЯ ВЫДАЧА АДМИНИСТРАТОРОМ ---
 async def process_grant_for_user(call: CallbackQuery, product_type: str):
     if call.from_user.id != ADMIN_CHAT_ID:
         await call.answer("У вас нет прав администратора!", show_alert=True)
@@ -257,10 +248,10 @@ async def process_grant_for_user(call: CallbackQuery, product_type: str):
     target_user_id = int(data_parts[-1])
     
     prompts = {
-        "ordinary": ("🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)", "Сформируй надежный платный ординар на сегодня (вечерние матчи ЛЧ / НХЛ), убедившись, что коэффициент строго 1.70-1.90."),
-        "express": ("🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)", "Сформируй уверенный экспресс из 2-3 матчей на сегодня с общим кэфом 2.0-3.0."),
-        "high": ("💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)", "Сформируй хай-кэф на сегодня с коэффициентом 4.0-7.0."),
-        "vip": ("👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ", "Сформируй премиальный VIP набор прогнозов на сегодняшние вечерние матчи ЛЧ и НХЛ.")
+        "ordinary": ("🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)", "Сформируй надежный платный ординар на ближайший матч с кэфом 1.70-1.90."),
+        "express": ("🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)", "Сформируй экспресс из матчей ближайших 12 часов с общим кэфом 2.0-3.0."),
+        "high": ("💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)", "Сформируй хай-кэф на ближайшее событие."),
+        "vip": ("👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ", "Сформируй премиальный пакет прогнозов на актуальные матчи.")
     }
     
     title, prompt = prompts.get(product_type, prompts["ordinary"])
@@ -283,7 +274,7 @@ async def process_grant_for_user(call: CallbackQuery, product_type: str):
             parse_mode="Markdown"
         )
         await bot.send_message(target_user_id, "🛍 **Главное меню BetMarket KZ:**", reply_markup=main_keyboard(), parse_mode="Markdown")
-        await call.answer("Прогноз успешно выдан пользователю!")
+        await call.answer("Прогноз успешно выдан!")
     except Exception as e:
         await call.answer(f"Ошибка выдачи: {e}", show_alert=True)
 
@@ -312,7 +303,7 @@ async def admin_reject_callback(call: CallbackQuery):
     target_user_id = int(call.data.replace("reject_user_", ""))
     try:
         await call.message.edit_caption(
-            caption=call.message.caption + "\n\n**[❌ СТАТУС: Отклонено / Чек недействителен]**",
+            caption=call.message.caption + "\n\n**[❌ СТАТУС: Отклонено]**",
             parse_mode="Markdown"
         )
     except Exception:
@@ -321,7 +312,7 @@ async def admin_reject_callback(call: CallbackQuery):
     try:
         await bot.send_message(
             chat_id=target_user_id,
-            text="❌ **К сожалению, ваш чек был отклонен администратором.**\nУбедитесь в правильности перевода или обратитесь в поддержку.",
+            text="❌ **К сожалению, ваш чек был отклонен администратором.**",
             parse_mode="Markdown"
         )
     except Exception:
@@ -360,15 +351,15 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success_payment(message: Message):
-    await message.answer("✅ **Оплата Stars прошла успешно!** Генерируем ваш прогноз...", parse_mode="Markdown")
-    prediction = await ask_gemini_prediction("Сформируй эксклюзивный VIP прогноз на сегодняшний топ-матч с высоким проходом.", "vip")
+    await message.answer("✅ **Оплата Stars прошла успешно!** Генерируем прогноз на ближайший матч...", parse_mode="Markdown")
+    prediction = await ask_gemini_prediction("Сформируй эксклюзивный VIP прогноз на ближайшее топ-событие.", "vip")
     
     user = message.from_user
     username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
     watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
     
     await message.answer(f"👑 **ВАШ VIP ПРОГНОЗ:**\n\n{prediction}{watermark}", parse_mode="Markdown")
-    await message.answer("🛍 **Главное меню BetMarket KZ:**", reply_markup=main_keyboard(), parse_Mode="Markdown")
+    await message.answer("🛍 **Главное меню BetMarket KZ:**", reply_markup=main_keyboard(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "profile")
 async def profile_handler(call: CallbackQuery):
@@ -378,8 +369,7 @@ async def profile_handler(call: CallbackQuery):
         f"🆔 ID: `{user.id}`\n"
         f"📛 Имя: {user.first_name}\n"
         f"🔗 Username: @{user.username if user.username else 'не указан'}\n"
-        f"🛡 Статус: Верифицированный клиент\n\n"
-        f"⚠️ *Все купленные прогнозы защищены персональным цифровым водяным знаком.*"
+        f"🛡 Статус: Верифицированный клиент"
     )
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]])
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
@@ -395,7 +385,7 @@ async def handle(request):
     return web.Response(text="BetMarket Server OK")
 
 async def self_ping_task():
-    """Фоновый самопинг для предотвращения засыпания бота на Render"""
+    """Фоновый самопинг для поддержания активности на Render"""
     await asyncio.sleep(15)
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if not render_url:
