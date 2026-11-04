@@ -43,39 +43,39 @@ PRODUCTS = {
 }
 
 SYSTEM_ANALYST_INSTRUCTION = """
-Ты — профессиональный спортивный каппер платформы BetMarket KZ.
-Сформируй 1 уверенный ординар по футболу (топ-лиги), НХЛ или НБА.
-Коэффициент строго от 1.60 до 2.00.
-Дай четкую аргументацию, аналитику и оформи красиво с эмодзи.
+Ты — главный спортивный аналитик и каппер платформы BetMarket KZ.
+Строгие правила:
+1. Анализируй ТОЛЬКО те матчи актуальной даты, которые ЕЩЕ НЕ НАЧАЛИСЬ (исключай лайв и матчи, которые уже идут или завершились).
+2. Используй актуальные матчи топ-лиг футбола, КХЛ, НХЛ, НБА на сегодня.
+3. Если на сегодня в топ-лигах НЕТ надежных матчей под нужные коэффициенты, или коэффициенты просели, строго ответь одной фразой: «НЕТ ЛИНИИ НА СЕГОДНЯ».
+4. Ни в коем случае не придумывай матчи из прошлого.
 """
 
-async def ask_gemini_prediction(prompt_text: str) -> str:
-    """Безопасный запрос к Gemini с тайм-аутом 7 секунд"""
+async def ask_gemini_prediction(prompt_text: str, product_type: str = "general") -> str:
+    """Безопасный запрос к Gemini с привязкой к дате и проверкой актуальности линии"""
+    current_date = datetime.now().strftime("%d.%m.%Y")
+    
+    full_prompt = (
+        f"Текущая дата и время сегодня: {current_date}. "
+        f"Убедись, что матч еще НЕ начался и коэффициенты актуальны. Если хороших вариантов нет, матч идет или кэф упал, напиши ровно: «НЕТ ЛИНИИ НА СЕГОДНЯ». "
+        f"Задание: {prompt_text}"
+    )
+    
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        
-        # Облачаем вызов в wait_for, чтобы бот не вис более 7 секунд
         response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt_text),
-            timeout=7.0
+            asyncio.to_thread(model.generate_content, full_prompt),
+            timeout=10.0
         )
-        return response.text.strip()
-    except asyncio.TimeoutError:
-        logging.error("Gemini API Timeout: Превышено время ожидания ответа")
-        return (
-            "🏒 **НХЛ: Тампа-Бэй — Детройт**\n"
-            "• **Ставка:** Победа «Тампа-Бэй» в матче (вкл. ОТ и буллиты)\n"
-            "• **Коэффициент:** 1.75\n\n"
-            "📊 **Аналитика:** «Тампа» традиционно сильна на домашней арене и обладает топовым реализацией большинства (PP > 25%). У «Детройта» проблемы с дисциплиной в гостевых встречах."
-        )
+        text = response.text.strip()
+        
+        if "НЕТ ЛИНИИ НА СЕГОДНЯ" in text or "Реал" in text or "Барселона" in text:
+            return "NO_LINE"
+            
+        return text
     except Exception as e:
         logging.error(f"Gemini API Error: {e}")
-        return (
-            "⚽ **Футбол: Реал Мадрид — Барселона**\n"
-            "• **Ставка:** Тотал больше (2.5)\n"
-            "• **Коэффициент:** 1.80\n\n"
-            "📊 **Аналитика:** Обе команды показывают высокую результативность в атаке и регулярно пробивают данный тотал в очных противостояниях."
-        )
+        return "NO_LINE"
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -119,21 +119,21 @@ async def back_to_main(call: CallbackQuery):
 
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
-    # Уведомляем Telegram, что кнопка нажата (убирает часики на кнопке)
     await call.answer("Генерируем прогноз...")
-    
     await call.message.edit_text("⏳ *Анализируем матчи и подготавливаем бесплатный ординар...*", parse_mode="Markdown")
     
     current_date = datetime.now().strftime("%d.%m.%Y")
-    prompt = f"Сформируй 1 бесплатный ординар на {current_date} с коэффициентом от 1.60 до 2.00."
+    prompt = f"Сформируй 1 бесплатный ординар на сегодня ({current_date}) с коэффициентом строго от 1.60 до 2.00."
     
-    result = await ask_gemini_prediction(prompt)
+    result = await ask_gemini_prediction(prompt, "free")
     
-    user = call.from_user
-    username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
-    watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая или получая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
-    
-    report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n{result}{watermark}"
+    if result == "NO_LINE":
+        report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n⚠️ На данный момент в линии нет матчей, удовлетворяющих критериям безопасности и коэффициентов (1.6-2.0). Ожидайте обновления линии."
+    else:
+        user = call.from_user
+        username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
+        watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая или получая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
+        report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n{result}{watermark}"
     
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В главное меню", callback_data="main_menu")]])
     await call.message.edit_text(report, reply_markup=back_kb, parse_mode="Markdown")
@@ -216,7 +216,7 @@ async def handle_receipt_photo(message: Message):
     
     await message.answer("✅ **Чек успешно отправлен администратору!**\n\nОжидайте проверки. После подтверждения бот автоматически выдаст вам прогноз.")
 
-# --- УНИВЕРСАЛЬНАЯ ВЫДАЧА АДМИНИСТРАТОРОМ ---
+# --- УНИВЕРСАЛЬНАЯ ВЫДАЧА АДМИНИСТРАТОРОМ С ЗАЩИТОЙ ---
 async def process_grant_for_user(call: CallbackQuery, product_type: str):
     if call.from_user.id != ADMIN_CHAT_ID:
         await call.answer("У вас нет прав администратора!", show_alert=True)
@@ -225,18 +225,31 @@ async def process_grant_for_user(call: CallbackQuery, product_type: str):
     data_parts = call.data.split("_")
     target_user_id = int(data_parts[-1])
     
-    if product_type == "ordinary":
-        prompt = "Сформируй надежный платный ординар с коэффициентом строго от 1.70 до 1.90."
-        title = "🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)"
-    elif product_type == "express":
-        prompt = "Сформируй уверенный экспресс из 2-3 матчей с общим итоговым коэффициентом от 2.0 до 3.0."
-        title = "🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)"
-    elif product_type == "high":
-        prompt = "Сформируй хай-кэф экспресс или ординар с коэффициентом от 4.0 до 7.0."
-        title = "💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)"
-    else:
-        prompt = "Сформируй премиальный VIP набор прогнозов."
-        title = "👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ"
+    prompts = {
+        "ordinary": ("🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)", "Сформируй надежный платный ординар на сегодня, убедившись, что матч не начался и коэффициенты актуальны (1.70-1.90)."),
+        "express": ("🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)", "Сформируй уверенный экспресс из 2-3 матчей на сегодня с общим кэфом 2.0-3.0. Матчи не должны идти в данный момент."),
+        "high": ("💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)", "Сформируй хай-кэф на сегодня с коэффициентом 4.0-7.0. Только актуальные будущие матчи."),
+        "vip": ("👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ", "Сформируй премиальный VIP набор прогнозов на сегодняшние актуальные матчи.")
+    }
+    
+    title, prompt = prompts.get(product_type, prompts["ordinary"])
+    prediction = await ask_gemini_prediction(prompt, product_type)
+    
+    if prediction == "NO_LINE":
+        await call.answer("⚠️ ИИ определил, что хорошей линии на этот тип сейчас нет (матч идет или кэф упал).", show_alert=True)
+        try:
+            await call.message.edit_caption(
+                caption=call.message.caption + "\n\n**[⚠️ ОТКЛОНЕНО: Нет надежной линии / Матч идет]**",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+        await bot.send_message(
+            chat_id=target_user_id,
+            text="⚠️ **Проверка линии:** К сожалению, на данный момент коэффициент просел или подходящие матчи уже начались. Администратор отклонил выдачу (средства будут возвращены или вам предоставят прогноз на следующую серию игр).",
+            parse_mode="Markdown"
+        )
+        return
 
     try:
         await call.message.edit_caption(
@@ -247,12 +260,11 @@ async def process_grant_for_user(call: CallbackQuery, product_type: str):
         pass
     
     try:
-        prediction = await ask_gemini_prediction(prompt)
         watermark = f"\n\n---\n🔒 *Персональная лицензия для ID: {target_user_id}*\n⚠️ Покупая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
         
         await bot.send_message(
             chat_id=target_user_id, 
-            text=f"🎉 **Ваша оплата Kaspi подтверждена администратором!**\n\n{title}:\n\n{prediction}{watermark}",
+            text=f"🎉 **Ваша оплата подтверждена администратором!**\n\n{title}:\n\n{prediction}{watermark}",
             parse_mode="Markdown"
         )
         await bot.send_message(target_user_id, "🛍 **Главное меню BetMarket KZ:**", reply_markup=main_keyboard(), parse_mode="Markdown")
@@ -333,10 +345,14 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success_payment(message: Message):
-    await message.answer("✅ **Оплата Stars прошла успешно!** Генерируем ваш защищенный персональный прогноз...", parse_mode="Markdown")
-    prompt = "Сформируй эксклюзивный VIP прогноз на топ-матч с высоким проходом."
-    prediction = await ask_gemini_prediction(prompt)
+    await message.answer("✅ **Оплата Stars прошла успешно!** Проверяем актуальную линию и генерируем прогноз...", parse_mode="Markdown")
+    prompt = "Сформируй эксклюзивный VIP прогноз на сегодняшний топ-матч с высоким проходом."
+    prediction = await ask_gemini_prediction(prompt, "vip")
     
+    if prediction == "NO_LINE":
+        await message.answer("⚠️ На данный момент идеальных матчей в линии нет (кэфы просели или матчи начались). Администратор свяжется с вами или вернет средства.")
+        return
+        
     user = message.from_user
     username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
     watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
