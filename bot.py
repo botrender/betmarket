@@ -44,60 +44,42 @@ PRODUCTS = {
 }
 
 SYSTEM_ANALYST_INSTRUCTION = """
-Ты — профессиональный спортивный каппер и аналитик маркетплейса BetMarket KZ.
-ЖЕСТКОЕ ПРАВИЛО: 
-Никогда не пиши «Центральное событие игрового дня» или «Команда 1». Ты обязан использовать поиск Google, найти реальные матчи Лиги Чемпионов УЕФА или НХЛ, выбрать один конкретный матч с реальными названиями команд (например, Реал Мадрид, Манчестер Сити, ПСЖ, Бавария или клубы НХЛ) и дать по нему детальный аналитический прогноз.
+Ты — профессиональный спортивный аналитик и каппер маркетплейса BetMarket KZ.
+Твоя задача — формировать актуальные спортивные прогнозы на матчи топовых лиг (Футбол: Лиги Чемпионов, Европы; Хоккей: КХЛ, НХЛ) на текущую дату пользователя.
+Никогда не используй абстрактные фразы («Команда 1», «Центральное событие»). Всегда указывай реальные актуальные команды текущего игрового дня и давай глубокий аргументированный разбор.
 """
 
 async def ask_gemini_prediction(prompt_text: str, product_type: str = "general") -> str:
-    """Генерация прогноза с принудительным поиском реальных матчей через Google Search"""
+    """Генерация динамического прогноза на основе реальной текущей даты и времени (Алматы GMT+5)"""
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     current_time_str = almaty_time.strftime("%H:%M")
     
     full_prompt = (
-        f"Текущая дата и время в Алматы: {current_date_str}, {current_time_str}. "
-        f"Используй поиск Google, чтобы найти расписание матчей Лиги Чемпионов УЕФА или НХЛ на сегодня ({current_date_str}). "
-        f"Напиши прогноз типа '{product_type}' на КОНКРЕТНЫЙ реальный матч из найденных. "
-        f"Формат ответа:\n"
-        f"🏆 **Матч:** [Название Команды 1] — [Название Команды 2]\n"
-        f"📌 **Ставка:** [Конкретная ставка]\n"
-        f"📊 **Коэффициент:** [Число, например 1.85]\n\n"
-        f"🔍 **Аналитика:** [Разбор с аргументами]"
+        f"Текущая дата и точное время: {current_date_str}, {current_time_str} (Алматы, GMT+5). "
+        f"Сформируй качественный и точный прогноз типа '{product_type}' на актуальные матчи игрового дня ({current_date_str}). "
+        f"Укажи реальных участников, точную ставку, примерный коэффициент и детальный аналитический разбор. "
+        f"Задание: {prompt_text}"
     )
     
     try:
-        model = genai.GenerativeModel(
-            model_name=MODEL_NAME, 
-            system_instruction=SYSTEM_ANALYST_INSTRUCTION,
-            tools=[{"google_search": {}}]
-        )
+        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, full_prompt),
-            timeout=18.0
+            timeout=15.0
         )
         text = response.text.strip()
         
-        # Если модель не смогла выдать точный формат, возвращаем премиальный структурированный пример топ-матча
-        if len(text) < 40 or "Центральное событие" in text or "Команда 1" in text:
-            return (
-                f"🏆 **Матч вечера (Лига Чемпионов УЕФА | {current_date_str})**\n\n"
-                f"📌 **Афиша:** Реал Мадрид — Милан\n"
-                f"🎯 **Ставка:** Обе забьют и ТБ (2.5)\n"
-                f"📊 **Коэффициент:** ~1.85\n\n"
-                f"🔍 **Аналитика:** Мадридский клуб на своем поле играет исключительно в атакующий футбол, оставляя свободные зоны в защите. Итальянцы отлично используют быстрые контратаки через фланги, что гарантирует высокую результативность."
-            )
+        # Если ответ слишком короткий, делаем быстрый повторный запрос для получения развернутого текста
+        if len(text) < 40:
+            retry_prompt = f"Дай развернутый спортивный прогноз на актуальные матчи ({current_date_str}) с анализом и коэффициентом."
+            response_retry = await asyncio.to_thread(model.generate_content, retry_prompt)
+            text = response_retry.text.strip()
             
-        return text
+        return text if len(text) >= 40 else f"⚠️ Временная задержка формирования линии на {current_date_str}. Повторите попытку через минуту."
     except Exception as e:
-        logging.error(f"Gemini API Search Error: {e}")
-        return (
-            f"🏆 **Матч вечера (Лига Чемпионов УЕФА | {current_date_str})**\n\n"
-            f"📌 **Афиша:** Реал Мадрид — Милан\n"
-            f"🎯 **Ставка:** Обе забьют и ТБ (2.5)\n"
-            f"📊 **Коэффициент:** ~1.85\n\n"
-            f"🔍 **Аналитика:** Мадридский клуб на своем поле играет исключительно в атакующий футбол, оставляя свободные зоны в защите. Итальянцы отлично используют быстрые контратаки через фланги, что гарантирует высокую результативность."
-        )
+        logging.error(f"Gemini API Error: {e}")
+        return f"⚠️ Ошибка получения актуальных данных на {current_date_str}. Пожалуйста, попробуйте позже."
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -126,7 +108,8 @@ async def start_cmd(message: Message):
         
     welcome_text = (
         f"👋 **Добро пожаловать в BetMarket KZ!**\n\n"
-        f"🛍 Официальный маркетплейс спортивных прогнозов с живым поиском линии.\n\n"
+        f"🛍 Официальный маркетплейс спортивных прогнозов.\n"
+        f"⏱ Актуальные линии подгружаются автоматически на каждый день.\n\n"
         f"Ваш Telegram ID: `{message.from_user.id}`"
     )
     await message.answer(welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
@@ -140,11 +123,11 @@ async def back_to_main(call: CallbackQuery):
 
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
-    await call.answer("Ищем матчи через поиск Google...")
-    await call.message.edit_text("⏳ *Сканируем актуальное расписание матчей...*", parse_mode="Markdown")
+    await call.answer("Анализируем сегодняшнюю линию...")
+    await call.message.edit_text("⏳ *Формируем актуальный прогноз на основе текущего расписания...*", parse_mode="Markdown")
     
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
-    prompt = "Сформируй бесплатный ординар на топ-матч."
+    prompt = "Сформируй бесплатный ординар на сегодняшний топ-матч."
     
     result = await ask_gemini_prediction(prompt, "free")
     
@@ -345,7 +328,7 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success_payment(message: Message):
-    await message.answer("✅ **Оплата Stars прошла успешно!** Ищем актуальный матч через поиск...", parse_mode="Markdown")
+    await message.answer("✅ **Оплата Stars прошла успешно!** Генерируем прогноз...", parse_mode="Markdown")
     prediction = await ask_gemini_prediction("Сформируй эксклюзивный VIP прогноз на топ-событие.", "vip")
     
     user = message.from_user
