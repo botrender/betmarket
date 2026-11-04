@@ -2,7 +2,7 @@ import asyncio
 import logging
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart, Command
@@ -44,20 +44,24 @@ PRODUCTS = {
 
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и каппер платформы BetMarket KZ.
+Учитывай, что текущее время пользователя — по часовому поясу Алматы (GMT+5).
 Строгие правила:
-1. Анализируй ТОЛЬКО те матчи актуальной даты, которые ЕЩЕ НЕ НАЧАЛИСЬ (исключай лайв и матчи, которые уже идут или завершились).
-2. Используй актуальные матчи топ-лиг футбола, КХЛ, НХЛ, НБА на сегодня.
-3. Если на сегодня в топ-лигах НЕТ надежных матчей под нужные коэффициенты, или коэффициенты просели, строго ответь одной фразой: «НЕТ ЛИНИИ НА СЕГОДНЯ».
+1. Анализируй матчи актуальной даты, которые пройдут СЕГОДНЯ ВЕЧЕРОМ и НОЧЬЮ (включая матчи Лиги Чемпионов в 22:45 по Алматы и ночные матчи НХЛ/НБА). Они НЕ считаются прошедшими, если их время начала позже текущего момента!
+2. Используй актуальные матчи топ-лиг футбола (ЛЧ), КХЛ, НХЛ, НБА на сегодня.
+3. Если на сегодня в топ-лигах действительно нет ни одного подходящего матча под нужные коэффициенты, строго ответь: «НЕТ ЛИНИИ НА СЕГОДНЯ».
 4. Ни в коем случае не придумывай матчи из прошлого.
 """
 
 async def ask_gemini_prediction(prompt_text: str, product_type: str = "general") -> str:
-    """Безопасный запрос к Gemini с привязкой к дате и проверкой актуальности линии"""
-    current_date = datetime.now().strftime("%d.%m.%Y")
+    """Безопасный запрос к Gemini с учетом времени Алматы (GMT+5) и проверкой линии"""
+    almaty_time = datetime.now(timezone(timedelta(hours=5)))
+    current_date_str = almaty_time.strftime("%d.%m.%Y")
+    current_time_str = almaty_time.strftime("%H:%M")
     
     full_prompt = (
-        f"Текущая дата и время сегодня: {current_date}. "
-        f"Убедись, что матч еще НЕ начался и коэффициенты актуальны. Если хороших вариантов нет, матч идет или кэф упал, напиши ровно: «НЕТ ЛИНИИ НА СЕГОДНЯ». "
+        f"Текущая дата и точное время в Алматы: {current_date_str}, {current_time_str}. "
+        f"Убедись, что ты берешь матчи, которые состоятся СЕГОДНЯ ВЕЧЕРОМ или НОЧЬЮ (например, ЛЧ в 22:45 или НХЛ). Они еще НЕ начались, если их время позже {current_time_str}. "
+        f"Если хороших вариантов нет или кэф упал, напиши ровно: «НЕТ ЛИНИИ НА СЕГОДНЯ». "
         f"Задание: {prompt_text}"
     )
     
@@ -65,11 +69,11 @@ async def ask_gemini_prediction(prompt_text: str, product_type: str = "general")
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, full_prompt),
-            timeout=10.0
+            timeout=12.0
         )
         text = response.text.strip()
         
-        if "НЕТ ЛИНИИ НА СЕГОДНЯ" in text or "Реал" in text or "Барселона" in text:
+        if "НЕТ ЛИНИИ НА СЕГОДНЯ" in text or "Реал Мадрид — Барселона" in text:
             return "NO_LINE"
             
         return text
@@ -104,7 +108,7 @@ async def start_cmd(message: Message):
         
     welcome_text = (
         f"👋 **Добро пожаловать в BetMarket KZ!**\n\n"
-        f"🛍 Официальный маркетплейс спортивных прогнозов (Футбол топ-лиги, КХЛ, НХЛ, НБА).\n\n"
+        f"🛍 Официальный маркетплейс спортивных прогнозов (Футбол ЛЧ, КХЛ, НХЛ, НБА).\n\n"
         f"Ваш Telegram ID: `{message.from_user.id}`\n"
         f"Главное меню всегда доступно ниже или по кнопке **Menu** слева от ввода текста:"
     )
@@ -120,15 +124,15 @@ async def back_to_main(call: CallbackQuery):
 @router.callback_query(F.data == "team_free_pick")
 async def team_free_pick_handler(call: CallbackQuery):
     await call.answer("Генерируем прогноз...")
-    await call.message.edit_text("⏳ *Анализируем матчи и подготавливаем бесплатный ординар...*", parse_mode="Markdown")
+    await call.message.edit_text("⏳ *Анализируем вечерние матчи и подготавливаем бесплатный ординар...*", parse_mode="Markdown")
     
-    current_date = datetime.now().strftime("%d.%m.%Y")
+    current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
     prompt = f"Сформируй 1 бесплатный ординар на сегодня ({current_date}) с коэффициентом строго от 1.60 до 2.00."
     
     result = await ask_gemini_prediction(prompt, "free")
     
     if result == "NO_LINE":
-        report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n⚠️ На данный момент в линии нет матчей, удовлетворяющих критериям безопасности и коэффициентов (1.6-2.0). Ожидайте обновления линии."
+        report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n⚠️ На данный момент в линии нет матчей, удовлетворяющих критериям коэффициентов (1.6-2.0). Ожидайте вечернего обновления линии (ЛЧ / НХЛ)."
     else:
         user = call.from_user
         username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
@@ -226,27 +230,27 @@ async def process_grant_for_user(call: CallbackQuery, product_type: str):
     target_user_id = int(data_parts[-1])
     
     prompts = {
-        "ordinary": ("🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)", "Сформируй надежный платный ординар на сегодня, убедившись, что матч не начался и коэффициенты актуальны (1.70-1.90)."),
-        "express": ("🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)", "Сформируй уверенный экспресс из 2-3 матчей на сегодня с общим кэфом 2.0-3.0. Матчи не должны идти в данный момент."),
-        "high": ("💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)", "Сформируй хай-кэф на сегодня с коэффициентом 4.0-7.0. Только актуальные будущие матчи."),
-        "vip": ("👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ", "Сформируй премиальный VIP набор прогнозов на сегодняшние актуальные матчи.")
+        "ordinary": ("🎯 ВАШ ОПЛАЧЕННЫЙ ОРДИНАР (Кэф 1.7-1.9)", "Сформируй надежный платный ординар на сегодня (вечерние матчи ЛЧ / НХЛ), убедившись, что коэффициент строго 1.70-1.90."),
+        "express": ("🔥 ВАШ УВЕРЕННЫЙ ЭКСПРЕСС 2-3 (Кэф 2.0-3.0)", "Сформируй уверенный экспресс из 2-3 матчей на сегодня с общим кэфом 2.0-3.0."),
+        "high": ("💣 ВАШ ХАЙ-КЭФ ПРОГНОЗ (Кэф 4.0-7.0)", "Сформируй хай-кэф на сегодня с коэффициентом 4.0-7.0."),
+        "vip": ("👑 ВАША VIP-ПОДПИСКА НА 7 ДНЕЙ", "Сформируй премиальный VIP набор прогнозов на сегодняшние вечерние матчи ЛЧ и НХЛ.")
     }
     
     title, prompt = prompts.get(product_type, prompts["ordinary"])
     prediction = await ask_gemini_prediction(prompt, product_type)
     
     if prediction == "NO_LINE":
-        await call.answer("⚠️ ИИ определил, что хорошей линии на этот тип сейчас нет (матч идет или кэф упал).", show_alert=True)
+        await call.answer("⚠️ ИИ определил, что хорошей линии на этот тип сейчас нет.", show_alert=True)
         try:
             await call.message.edit_caption(
-                caption=call.message.caption + "\n\n**[⚠️ ОТКЛОНЕНО: Нет надежной линии / Матч идет]**",
+                caption=call.message.caption + "\n\n**[⚠️ ОТКЛОНЕНО: Нет надежной линии]**",
                 parse_mode="Markdown"
             )
         except Exception:
             pass
         await bot.send_message(
             chat_id=target_user_id,
-            text="⚠️ **Проверка линии:** К сожалению, на данный момент коэффициент просел или подходящие матчи уже начались. Администратор отклонил выдачу (средства будут возвращены или вам предоставят прогноз на следующую серию игр).",
+            text="⚠️ **Проверка линии:** К сожалению, на данный момент коэффициент просел или подходящие матчи еще не подошли по времени. Администратор отклонил выдачу (средства будут возвращены или вам предоставят прогноз на вечерние игры).",
             parse_mode="Markdown"
         )
         return
@@ -345,12 +349,12 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success_payment(message: Message):
-    await message.answer("✅ **Оплата Stars прошла успешно!** Проверяем актуальную линию и генерируем прогноз...", parse_mode="Markdown")
+    await message.answer("✅ **Оплата Stars прошла успешно!** Проверяем актуальную вечернюю линию и генерируем прогноз...", parse_mode="Markdown")
     prompt = "Сформируй эксклюзивный VIP прогноз на сегодняшний топ-матч с высоким проходом."
     prediction = await ask_gemini_prediction(prompt, "vip")
     
     if prediction == "NO_LINE":
-        await message.answer("⚠️ На данный момент идеальных матчей в линии нет (кэфы просели или матчи начались). Администратор свяжется с вами или вернет средства.")
+        await message.answer("⚠️ На данный момент идеальных матчей в линии нет. Администратор свяжется с вами или вернет средства.")
         return
         
     user = message.from_user
