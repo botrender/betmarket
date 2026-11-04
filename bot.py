@@ -4,6 +4,7 @@ import sys
 import os
 from datetime import datetime, timezone, timedelta
 from aiohttp import web
+import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
@@ -29,7 +30,7 @@ ADMIN_USERNAME = "BulatAtambayev"
 ADMIN_CHAT_ID = 1102082462
 
 genai.configure(api_key=GEMINI_API_KEY)
-MODEL_NAME = 'gemini-flash-latest'
+MODEL_NAME = 'gemini-flash-latest'  # Оставляем текущую модель по вашему выбору
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -46,7 +47,7 @@ SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и каппер платформы BetMarket KZ.
 Учитывай, что текущее время пользователя — по часовому поясу Алматы (GMT+5).
 Строгие правила:
-1. Анализируй матчи актуальной даты, которые пройдут СЕГОДНЯ ВЕЧЕРОМ и НОЧЬЮ (включая матчи Лиги Чемпионов в 22:45 по Алматы и ночные матчи НХЛ/НБА). Они НЕ считаются прошедшими, если их время начала позже текущего момента!
+1. Анализируй матчи актуальной даты, которые пройдут СЕГОДНЯ ВЕЧЕРОМ и НОЧЬЮ (включая матчи Лиги Чемпионов и ночные матчи НХЛ/НБА). Они НЕ считаются прошедшими, если их время начала позже текущего момента!
 2. Используй актуальные матчи топ-лиг футбола (ЛЧ), КХЛ, НХЛ, НБА на сегодня.
 3. Если на сегодня в топ-лигах действительно нет ни одного подходящего матча под нужные коэффициенты, строго ответь: «НЕТ ЛИНИИ НА СЕГОДНЯ».
 4. Ни в коем случае не придумывай матчи из прошлого.
@@ -60,7 +61,7 @@ async def ask_gemini_prediction(prompt_text: str, product_type: str = "general")
     
     full_prompt = (
         f"Текущая дата и точное время в Алматы: {current_date_str}, {current_time_str}. "
-        f"Убедись, что ты берешь матчи, которые состоятся СЕГОДНЯ ВЕЧЕРОМ или НОЧЬЮ (например, ЛЧ в 22:45 или НХЛ). Они еще НЕ начались, если их время позже {current_time_str}. "
+        f"Убедись, что ты берешь матчи, которые состоятся СЕГОДНЯ ВЕЧЕРОМ или НОЧЬЮ. Они еще НЕ начались, если их время позже {current_time_str}. "
         f"Если хороших вариантов нет или кэф упал, напиши ровно: «НЕТ ЛИНИИ НА СЕГОДНЯ». "
         f"Задание: {prompt_text}"
     )
@@ -384,9 +385,27 @@ async def stats_handler(call: CallbackQuery):
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]])
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
 
-# --- ВЕБ-СЕРВЕР ---
+# --- ВЕБ-СЕРВЕР И ФОНОВЫЙ САМОПИНГ ---
 async def handle(request):
     return web.Response(text="BetMarket Server OK")
+
+async def self_ping_task():
+    """Фоновая задача: каждые 10 минут пингует собственный сервер Render, чтобы бот не засыпал"""
+    await asyncio.sleep(15)  # Ждем пока сервер поднимется
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not render_url:
+        logging.info("RENDER_EXTERNAL_URL не найден, самопинг отключен (но локальный сервер активен).")
+        return
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(render_url) as resp:
+                    logging.info(f"Self-ping sent to {render_url}, status: {resp.status}")
+            except Exception as e:
+                logging.error(f"Self-ping error: {e}")
+            # Пингуем каждые 10 минут (600 секунд)
+            await asyncio.sleep(600)
 
 async def web_server():
     app = web.Application()
@@ -396,19 +415,37 @@ async def web_server():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    
+    # Запускаем фоновый самопинг
+    asyncio.create_task(self_ping_task())
 
 async def main():
-    await bot.set_my_commands([BotCommand(command="start", description="🏠 Главное меню BetMarket")])
+    try:
+        await bot.set_my_commands([BotCommand(command="start", description="🏠 Главное меню BetMarket")])
+    except Exception as e:
+        logging.error(f"Не удалось установить команды: {e}")
     
     dp.include_router(router)
-    await bot.delete_webhook(drop_pending_updates=True)
+    
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.error(f"Ошибка удаления вебхука: {e}")
+        
     await web_server()
-    logging.info("🚀 Бот и веб-сервер запущены!")
-    await dp.start_polling(bot)
+    logging.info("🚀 Бот, веб-сервер и фоновый самопинг успешно запущены!")
+    
+    # Бесконечный цикл с автопереподключением при сбоях
+    while True:
+        try:
+            await dp.start_polling(bot, handle_signals=False)
+        except Exception as e:
+            logging.error(f"⚠️ Ошибка поллинга: {e}. Переподключение через 5 секунд...")
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        pass
+        logging.info("Бот остановлен.")
