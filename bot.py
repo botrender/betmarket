@@ -34,7 +34,8 @@ ADMIN_USERNAME = "BulatAtambayev"
 ADMIN_CHAT_ID = 1102082462
 
 genai.configure(api_key=GEMINI_API_KEY)
-MODEL_NAME = 'gemini-flash-latest'
+# Используем стабильную версию модели во избежание сбоев
+MODEL_NAME = 'gemini-1.5-flash'
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -65,9 +66,26 @@ SYSTEM_ANALYST_INSTRUCTION = """
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Выдумывать несуществующие команды, матчи или результаты.
-- Ограничиваться банальными фразами вроде "команда сильнее". Анализируй форму команд, тренды, очные встречи и мотивацию.
-- Просто копировать переданный список матчей! Из любого списка ты ДОЛЖЕН выбрать топ-пары и написать по ним развернутый анализ.
+- Ограничиваться банальными фразами. Анализируй форму команд, тренды, очные встречи и мотивацию.
 """
+
+# --- УНИВЕРСАЛЬНЫЙ ЗАПРОС К ИИ С ЗАЩИТОЙ ОТ ОШИБОК 429 ---
+async def ask_gemini_with_retry(prompt: str, system_instruction: str = SYSTEM_ANALYST_INSTRUCTION, max_retries: int = 3) -> str:
+    delay = 2
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=system_instruction)
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            return response.text.strip()
+        except Exception as e:
+            logging.error(f"Gemini API Error (attempt {attempt+1}/{max_retries}): {e}")
+            if "429" in str(e) or "ResourceExhausted" in str(e) or "503" in str(e):
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2  # Экспоненциальная задержка (2с, 4с, 8с)
+                    continue
+            return f"⚠️ Временная перегрузка лимитов ИИ (Ошибка 429/503). Попробуйте повторить запрос через минуту."
+    return "⚠️ Не удалось получить ответ от ИИ из-за ограничения квот."
 
 # --- ГЕНЕРАТОР ЗАЩИЩЕННЫХ КАРТОЧЕК С ВОДЯНЫМИ ЗНАКАМИ ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
@@ -145,35 +163,28 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     bio.seek(0)
     return bio
 
-# --- ИИ МОДУЛИ С УМНОЙ ОБРАБОТКОЙ СЫРЫХ СПИСКОВ ---
+# --- ИИ МОДУЛИ С ЗАЩИТОЙ ---
 async def expand_with_ai_reasoning(user_input_text: str) -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
         f"Текущая дата: {current_date_str}.\n"
-        f"Ниже приведён сырой список матчей/расписание от администратора:\n"
+        f"Ниже приведён список матчей/расписание от администратора:\n"
         f"-------------------\n"
         f"{user_input_text}\n"
         f"-------------------\n"
         f"Твоя задача:\n"
-        f"1. Внимательно изучи данный список матчей (Футбол, КХЛ, НХЛ, НБА).\n"
-        f"2. Выбери из этого списка 3-4 самых надёжных и перспективных матча.\n"
-        f"3. Напиши по каждому выбранному матчу сочную, глубокую аналитику с аргументацией (форма команд, очные встречи, тоталы).\n"
+        f"1. Изучи этот список матчей (Футбол, КХЛ, НХЛ, НБА).\n"
+        f"2. Выбери из него 3-4 самых надёжных матча.\n"
+        f"3. Напиши по ним сочную, глубокую аналитику с аргументацией.\n"
         f"4. Сформируй итоговый ответ в готовом формате:\n"
-        f"Бесплатный прогноз: [Выбранный матч, ставка, кэф и анализ]\n"
-        f"Ординар: [Выбранный матч, ставка, кэф и подробный разбор]\n"
-        f"Экспресс: [2 матча из списка, ставка, общий кэф и разбор]\n"
-        f"Хай-кэф: [Матч из списка с высокой доходностью, кэф от 4.0 и обоснование]"
+        f"Бесплатный прогноз: [Матч, ставка, кэф и анализ]\n"
+        f"Ординар: [Матч, ставка, кэф и подробный разбор]\n"
+        f"Экспресс: [2 матча, ставка, общий кэф и разбор]\n"
+        f"Хай-кэф: [Матч с высокой доходностью, кэф от 4.0 и обоснование]"
     )
-    try:
-        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        ai_text = response.text.strip()
-        return ai_text
-    except Exception as e:
-        logging.error(f"AI Reasoning error: {e}")
-        return f"⚠️ Ошибка при разборе списка матчей ИИ: {e}"
+    return await ask_gemini_with_retry(prompt)
 
 async def fetch_todays_schedule() -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
@@ -186,15 +197,11 @@ async def fetch_todays_schedule() -> str:
         f"3. 🏀 Баскетбол (НБА)\n"
         f"Выдай реальные вывески матчей без лишнего текста."
     )
-    try:
-        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        text = response.text.strip()
-        LAST_GENERATED_SCHEDULE["text"] = text
-        return f"🏟 **АКТУАЛЬНОЕ РАСПИСАНИЕ ({current_date_str}):**\n\n{text}"
-    except Exception as e:
-        logging.error(f"Schedule error: {e}")
-        return f"⚠️ Ошибка загрузки расписания: {e}"
+    res = await ask_gemini_with_retry(prompt)
+    if "⚠️" in res:
+        return res
+    LAST_GENERATED_SCHEDULE["text"] = res
+    return f"🏟 **АКТУАЛЬНОЕ РАСПИСАНИЕ ({current_date_str}):**\n\n{res}"
 
 async def ask_gemini_market_draft() -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
@@ -207,15 +214,11 @@ async def ask_gemini_market_draft() -> str:
         f"Экспресс: [2 матча с общим кэфом 2.0-3.0]\n"
         f"Хай-кэф: [Матч с высоким кэфом от 4.0]"
     )
-    try:
-        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        text = response.text.strip()
-        LAST_GENERATED_DRAFT["text"] = text
-        return f"📅 **Черновик линии на {current_date_str}:**\n\n{text}"
-    except Exception as e:
-        logging.error(f"Draft error: {e}")
-        return f"⚠️ Ошибка генерации черновика: {e}"
+    res = await ask_gemini_with_retry(prompt)
+    if "⚠️" in res:
+        return res
+    LAST_GENERATED_DRAFT["text"] = res
+    return f"📅 **Черновик линии на {current_date_str}:**\n\n{res}"
 
 # --- КЛАВИАТУРЫ ---
 def get_dynamic_keyboard():
@@ -489,7 +492,7 @@ async def admin_analyze_custom(message: Message):
         return
     full_text = message.text.replace("/analyze", "").strip()
     if not full_text:
-        await message.answer("⚠️ Укажите матчи после команды `/analyze`. Можно отправить как один матч, так и целый список полотном!", parse_mode="Markdown")
+        await message.answer("⚠️ Укажите матчи после команды `/analyze`. Можно отправить список полотном!", parse_mode="Markdown")
         return
         
     status_msg = await message.answer("⏳ ИИ обрабатывает список матчей и пишет глубокий анализ...")
@@ -670,7 +673,7 @@ async def main():
             await dp.start_polling(bot, handle_signals=False)
         except Exception as e:
             logging.error(f"Polling error: {e}")
-            await asyncio.sleep(5)
+            asyncio.sleep(5)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
