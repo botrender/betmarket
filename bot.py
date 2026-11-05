@@ -65,8 +65,8 @@ SYSTEM_ANALYST_INSTRUCTION = """
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Выдумывать несуществующие команды, матчи или результаты.
-- Ограничиваться банальными фразами. Анализируй форму команд, тренды, очные встречи и мотивацию.
-Структурируй ответы четко и профессионально.
+- Ограничиваться банальными фразами вроде "команда сильнее". Анализируй форму команд, тренды, очные встречи и мотивацию.
+- Просто копировать переданный список матчей! Из любого списка ты ДОЛЖЕН выбрать топ-пары и написать по ним развернутый анализ.
 """
 
 # --- ГЕНЕРАТОР ЗАЩИЩЕННЫХ КАРТОЧЕК С ВОДЯНЫМИ ЗНАКАМИ ---
@@ -145,25 +145,35 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     bio.seek(0)
     return bio
 
-# --- ИИ МОДУЛИ БЕЗ ИСКУССТВЕННЫХ ОГРАНИЧЕНИЙ ---
+# --- ИИ МОДУЛИ С УМНОЙ ОБРАБОТКОЙ СЫРЫХ СПИСКОВ ---
 async def expand_with_ai_reasoning(user_input_text: str) -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
-        f"Текущая дата: {current_date_str}. "
-        f"Администратор зафиксировал прогноз: '{user_input_text}'. "
-        f"Напиши детальное профессиональное аналитическое обоснование к этому матчу. "
-        f"Разбери форму команд, статистику и мотивацию. Сделай текст готовым к публикации."
+        f"Текущая дата: {current_date_str}.\n"
+        f"Ниже приведён сырой список матчей/расписание от администратора:\n"
+        f"-------------------\n"
+        f"{user_input_text}\n"
+        f"-------------------\n"
+        f"Твоя задача:\n"
+        f"1. Внимательно изучи данный список матчей (Футбол, КХЛ, НХЛ, НБА).\n"
+        f"2. Выбери из этого списка 3-4 самых надёжных и перспективных матча.\n"
+        f"3. Напиши по каждому выбранному матчу сочную, глубокую аналитику с аргументацией (форма команд, очные встречи, тоталы).\n"
+        f"4. Сформируй итоговый ответ в готовом формате:\n"
+        f"Бесплатный прогноз: [Выбранный матч, ставка, кэф и анализ]\n"
+        f"Ординар: [Выбранный матч, ставка, кэф и подробный разбор]\n"
+        f"Экспресс: [2 матча из списка, ставка, общий кэф и разбор]\n"
+        f"Хай-кэф: [Матч из списка с высокой доходностью, кэф от 4.0 и обоснование]"
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.to_thread(model.generate_content, prompt)
         ai_text = response.text.strip()
-        return f"{user_input_text}\n\n💡 Экспертная аналитика:\n{ai_text}"
+        return ai_text
     except Exception as e:
         logging.error(f"AI Reasoning error: {e}")
-        return user_input_text
+        return f"⚠️ Ошибка при разборе списка матчей ИИ: {e}"
 
 async def fetch_todays_schedule() -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
@@ -174,7 +184,7 @@ async def fetch_todays_schedule() -> str:
         f"1. ⚽ Футбол (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ/ЛЕ/ЛК)\n"
         f"2. 🏒 Хоккей (КХЛ, НХЛ)\n"
         f"3. 🏀 Баскетбол (НБА)\n"
-        f"Выдай реальные вывески матчей без лишней воды."
+        f"Выдай реальные вывески матчей без лишнего текста."
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
@@ -464,29 +474,14 @@ async def run_auto_analyze_callback(call: CallbackQuery):
     base_schedule = LAST_GENERATED_SCHEDULE.get("text", "Главные матчи дня.")
     await call.message.edit_text("⏳ *ИИ делает глубинную аналитику...*", parse_mode="Markdown")
     
-    prompt = (
-        f"На основе этого расписания подбери лучшие варианты ставок и сделай глубокий анализ:\n\n{base_schedule}\n\n"
-        f"Структура ответа:\n"
-        f"Бесплатный прогноз: [Матч, ставка, кэф и разбор]\n"
-        f"Ординар: [Матч, ставка, кэф и обоснование]\n"
-        f"Экспресс: [2 матча с общим кэфом 2.0-3.0]\n"
-        f"Хай-кэф: [Матч с высоким кэфом от 4.0]"
-    )
+    analyzed_text = await expand_with_ai_reasoning(base_schedule)
+    LAST_GENERATED_DRAFT["text"] = analyzed_text
     
-    try:
-        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        analyzed_text = response.text.strip()
-        LAST_GENERATED_DRAFT["text"] = analyzed_text
-        
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Одобрить и выставить на витрину", callback_data="approve_draft")],
-            [InlineKeyboardButton(text="🔄 Переанализировать", callback_data="run_auto_analyze")]
-        ])
-        await call.message.edit_text(f"📊 **Экспертный разбор ИИ:**\n\n{analyzed_text}", reply_markup=admin_kb, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Analyze error: {e}")
-        await call.message.edit_text("⚠️ Ошибка анализа.")
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Одобрить и выставить на витрину", callback_data="approve_draft")],
+        [InlineKeyboardButton(text="🔄 Переанализировать", callback_data="run_auto_analyze")]
+    ])
+    await call.message.edit_text(f"📊 **Экспертный разбор ИИ:**\n\n{analyzed_text}", reply_markup=admin_kb, parse_mode="Markdown")
 
 @router.message(Command("analyze"))
 async def admin_analyze_custom(message: Message):
@@ -494,12 +489,17 @@ async def admin_analyze_custom(message: Message):
         return
     full_text = message.text.replace("/analyze", "").strip()
     if not full_text:
-        await message.answer("⚠️ Укажите матч. Пример:\n`/analyze НХЛ: Флорида - Чикаго`", parse_mode="Markdown")
+        await message.answer("⚠️ Укажите матчи после команды `/analyze`. Можно отправить как один матч, так и целый список полотном!", parse_mode="Markdown")
         return
         
-    status_msg = await message.answer("⏳ ИИ пишет аналитическое обоснование...")
+    status_msg = await message.answer("⏳ ИИ обрабатывает список матчей и пишет глубокий анализ...")
     expanded = await expand_with_ai_reasoning(full_text)
-    await status_msg.edit_text(f"💡 **Разбор матча:**\n\n{expanded}")
+    LAST_GENERATED_DRAFT["text"] = expanded
+    
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Одобрить и выставить на витрину", callback_data="approve_draft")]
+    ])
+    await status_msg.edit_text(f"💡 **Экспертный разбор матчей:**\n\n{expanded}", reply_markup=admin_kb, parse_mode="Markdown")
 
 async def parse_and_store_with_ai(text_block: str):
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
@@ -564,7 +564,7 @@ async def approve_draft_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         return
     text_to_parse = LAST_GENERATED_DRAFT.get("text", "Ординар: Главный матч дня")
-    await call.message.edit_text("⏳ Обрабатываем и добавляем профессиональный разбор...")
+    await call.message.edit_text("⏳ Обрабатываем и выставляем на витрину...")
     await parse_and_store_with_ai(text_to_parse)
     await call.message.edit_text("✅ **Черновик одобрен!** Витрина маркета обновлена.")
 
@@ -647,7 +647,7 @@ async def main():
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню"),
             BotCommand(command="schedule", description="🏟 Расписание на сегодня"),
-            BotCommand(command="analyze", description="📊 Анализ матча"),
+            BotCommand(command="analyze", description="📊 Анализ списка матчей"),
             BotCommand(command="draft", description="📋 Черновик линии"),
             BotCommand(command="setmarket", description="🛠 Утвердить маркет")
         ], scope=admin_scope)
