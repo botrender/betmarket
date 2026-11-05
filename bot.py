@@ -22,7 +22,7 @@ from aiogram.types import (
 import google.generativeai as genai
 from PIL import Image, ImageDraw, ImageFont
 
-# --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
+# --- НАСТРОЙКИ И КОНФИгурация ---
 BOT_TOKEN = "9229154481:AAEQDxNsKv7mN6mH3wwMLOHuxV90h5fsjNs"
 
 part1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
@@ -57,13 +57,21 @@ PRODUCTS_BASE = {
     "high_odds": {"name": "💣 Хай-Кэф", "price_kz": 4000, "stars": 130},
 }
 
+# --- СТРОГИЕ ИНСТРУКЦИИ ДЛЯ ИИ (АКТУАЛЬНЫЕ МАТЧИ ТОП-ЛИГ) ---
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
-Твоя задача — писать глубокие, профессиональные спортивные обоснования и аналитику к матчам. 
-Когда тебе дают краткую ставку, ты должен аргументированно и развернуто описать почему этот прогноз зайдет (форма команд, мотивация, статистика, тактика). Пиши структурированно.
+Твоя главная задача — выдавать СТРОГО АКТУАЛЬНЫЕ И РЕАЛЬНЫЕ матчи на текущую дату.
+СПЕЦИАЛИЗАЦИЯ:
+⚽ Футбол: Топ-5 лиг Европы (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1) + Еврокубки (ЛЧ, ЛЕ, ЛК).
+🏒 Хоккей: КХЛ, НХЛ.
+🏀 Баскетбол: НБА.
+
+КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
+- Выдумывать матчи, команды или счета.
+- Использовать матчи из прошлых или будущих дней (игра должна проходить ровно в дату запроса).
+Если на сегодня в указанных лиге/виде спорта нет матчей, так и пиши. Бери только реальную спортивную линию дня.
 """
 
-# --- ГЕНЕРАЦИЯ КАРТИНКИ С ЧЕРЕДУЮЩИМИСЯ СТРОКАМИ (ID / USERNAME) ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1100
     img = Image.new('RGB', (width, height), color=(15, 23, 42)) # Тёмно-синий фон
@@ -77,12 +85,11 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     ]
     
     font_title, font_text, font_watermark, font_small = None, None, None, None
-    
     for path in font_paths:
         try:
-            font_title = ImageFont.truetype(path, 30)
-            font_text = ImageFont.truetype(path, 20)
-            font_watermark = ImageFont.truetype(path, 28) # Четкий размер для строк
+            font_title = ImageFont.truetype(path, 28)
+            font_text = ImageFont.truetype(path, 18)
+            font_watermark = ImageFont.truetype(path, 26)
             font_small = ImageFont.truetype(path, 16)
             break
         except Exception:
@@ -91,36 +98,30 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     if not font_title:
         font_title = font_text = font_watermark = font_small = ImageFont.load_default()
 
-    # Слой для водяных знаков с чередованием строк (ID на одной, Ник на другой)
+    # Слой водяных знаков с чередованием строк (ID на одной, Ник на другой)
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     
     line_toggle = 0
-    for y in range(40, height, 90): # Шаг по вертикали
-        if line_toggle % 2 == 0:
-            watermark_str = f"ID: {user_id}"
-        else:
-            watermark_str = f"@{username}"
-            
-        # Рисуем строку несколько раз по горизонтали для полного покрытия
-        for x in range(20, width, 300):
-            d_txt.text((x, y), watermark_str, fill=(100, 116, 139, 140), font=font_watermark)
+    for y in range(40, height, 90):
+        watermark_str = f"ID: {user_id}" if line_toggle % 2 == 0 else f"@{username}"
+        for x in range(20, width, 280):
+            d_txt.text((x, y), watermark_str, fill=(100, 116, 139, 130), font=font_watermark)
         line_toggle += 1
             
-    # Накладываем водяные знаки
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
-    # 2. Шапка брендинга
-    draw.rectangle([(30, 30), (width - 30, 95)], fill=(30, 58, 138))
-    draw.text((50, 40), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
+    # Шапка брендинга
+    draw.rectangle([(30, 30), (width - 30, 90)], fill=(30, 58, 138))
+    draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
     
-    # 3. Заголовок товара
-    draw.text((50, 120), title, fill=(250, 204, 21), font=font_title)
+    # Заголовок товара
+    draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
     
-    # 4. Вывод текста прогноза с обоснованием
+    # Текст прогноза и аналитики
     margin = 50
-    offset = 175
+    offset = 165
     max_width = width - (margin * 2)
     
     for paragraph in text_content.split('\n'):
@@ -128,16 +129,16 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         line = ''
         for word in words:
             test_line = line + word + ' '
-            if len(test_line) * 10 > max_width:
+            if len(test_line) * 9.5 > max_width:
                 draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
-                offset += 28
+                offset += 24
                 line = word + ' '
             else:
                 line = test_line
         draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
-        offset += 34
+        offset += 30
 
-    # 5. Нижняя панель защиты
+    # Нижняя панель защиты
     draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id}) | Защита BetMarket KZ"
     draw.text((40, height - 72), warning_text, fill=(255, 255, 255), font=font_small)
@@ -149,12 +150,14 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     return bio
 
 async def expand_with_ai_reasoning(user_input_text: str) -> str:
-    """Генерирует мощное аналитическое обоснование через ИИ"""
+    almaty_time = datetime.now(timezone(timedelta(hours=5)))
+    current_date_str = almaty_time.strftime("%d.%m.%Y")
+    
     prompt = (
-        f"Администратор предоставил ставку: '{user_input_text}'. "
-        f"Напиши глубокое, развернутое спортивное обоснование и аналитику для этого прогноза. "
-        f"Объясни почему эта ставка должна зайти, опираясь на форму команд и статистику. "
-        f"Выдай результат в красивом структурированном виде (несколько предложений анализа)."
+        f"Текущая дата: {current_date_str}. "
+        f"Администратор указал следующий прогноз: '{user_input_text}'. "
+        f"Напиши профессиональное спортивное обоснование и аналитику по матчу, опираясь на текущую форму команд на дату {current_date_str}. "
+        f"Сделай текст развернутым, авторитетным и готовым для публикации."
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
@@ -163,8 +166,7 @@ async def expand_with_ai_reasoning(user_input_text: str) -> str:
             timeout=15.0
         )
         ai_text = response.text.strip()
-        # Возвращаем исходный текст админа + развернутый анализ от ИИ
-        return f"{user_input_text}\n\n💡 Аналитика и обоснование:\n{ai_text}"
+        return f"{user_input_text}\n\n💡 Экспертная аналитика:\n{ai_text}"
     except Exception as e:
         logging.error(f"AI Reasoning error: {e}")
         return user_input_text
@@ -174,11 +176,13 @@ async def ask_gemini_market_draft() -> str:
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
-        f"Сегодня {current_date_str}. Составь утреннюю подборку актуальных матчей с подробным обоснованием:\n"
-        f"Бесплатный прогноз: [Матч, ставка, кэф и обоснование]\n"
-        f"Ординар: [Матч, ставка, кэф и обоснование]\n"
-        f"Экспресс: [2 матча с общим кэфом 2.0-3.0 и обоснованием]\n"
-        f"Хай-кэф: [Матчи с высоким кэфом от 4.0 и обоснованием]"
+        f"СЕГОДНЯШНЯЯ ДАТА: {current_date_str}. "
+        f"Составь утреннюю подборку матчей, которые играются РОВНО СЕГОДНЯ ({current_date_str}) по топ-лигам (Футбол: топ-5, ЛЧ/ЛЕ/ЛК; Хоккей: КХЛ, НХЛ; Баскетбол: НБА). "
+        f"Предложи варианты с детальным обоснованием:\n"
+        f"Бесплатный прогноз: [Точный матч на сегодня, ставка, кэф и анализ]\n"
+        f"Ординар: [Точный матч на сегодня, ставка, кэф и аналитическое обоснование]\n"
+        f"Экспресс: [2 реальных матча на сегодня с общим кэфом 2.0-3.0 и обоснованием]\n"
+        f"Хай-кэф: [Реальные матчи на сегодня с высоким кэфом от 4.0 и обоснованием]"
     )
     
     try:
@@ -189,7 +193,7 @@ async def ask_gemini_market_draft() -> str:
         )
         text = response.text.strip()
         LAST_GENERATED_DRAFT["text"] = text
-        return text
+        return f"📅 Линия на сегодня: {current_date_str}\n\n{text}"
     except Exception as e:
         logging.error(f"Draft error: {e}")
         return "⚠️ Не удалось сгенерировать черновик."
@@ -229,7 +233,7 @@ async def start_cmd(message: Message):
         await message.delete()
     except Exception:
         pass
-    await message.answer("👋 **Добро пожаловать в BetMarket KZ!**", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
+    await message.answer("👋 **Добро пожаловать в BetMarket KZ!**\nОфициальный маркетплейс точных спортивных прогнозов.", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "main_menu")
 async def back_to_main(call: CallbackQuery):
@@ -382,8 +386,7 @@ async def profile_handler(call: CallbackQuery):
 async def stats_handler(call: CallbackQuery):
     await call.message.edit_text("📊 Проходимость: 74.2%\nROI: +19.1%", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]]))
 
-
-# --- АДМИН-ПАНЕЛЬ С ГАРАНТИРОВАННЫМ ИИ-ОБОСНОВАНИЕМ ---
+# --- АДМИН-ПАНЕЛЬ С АВТО-АНАЛИЗОМ ---
 
 async def parse_and_store_with_ai(text_block: str):
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
@@ -415,7 +418,6 @@ async def parse_and_store_with_ai(text_block: str):
             if mode and line.strip():
                 buf[mode].append(line.strip())
                 
-    # Принудительно вызываем ИИ для расширения каждого пункта аналитикой
     if buf["free"]:
         raw_text = " ".join(buf["free"])
         APPROVED_MARKET["free"] = await expand_with_ai_reasoning(raw_text)
@@ -436,28 +438,28 @@ async def parse_and_store_with_ai(text_block: str):
 async def admin_get_draft(message: Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         return
-    await message.answer("⏳ *ИИ формирует черновик с аналитикой...*", parse_mode="Markdown")
+    await message.answer("⏳ *ИИ анализирует матчи на сегодня по топ-лигам...*", parse_mode="Markdown")
     draft_text = await ask_gemini_market_draft()
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Одобрить черновик", callback_data="approve_draft")],
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh_draft")]
     ])
-    await message.answer(f"📋 **Черновик:**\n\n{draft_text}", reply_markup=admin_kb, parse_mode="Markdown")
+    await message.answer(f"📋 **Черновик на сегодня:**\n\n{draft_text}", reply_markup=admin_kb, parse_mode="Markdown")
 
 @router.callback_query(F.data == "approve_draft")
 async def approve_draft_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         return
     text_to_parse = LAST_GENERATED_DRAFT.get("text", "Ординар: Матч дня")
-    await call.message.edit_text("⏳ Обрабатываем и добавляем аналитику через ИИ...")
+    await call.message.edit_text("⏳ Обрабатываем и добавляем аналитику...")
     await parse_and_store_with_ai(text_to_parse)
-    await call.message.edit_text("✅ **Черновик одобрен!** ИИ развернул обоснования, витрина обновлена.")
+    await call.message.edit_text("✅ **Черновик одобрен!** Витрина обновлена актуальными данными.")
 
 @router.callback_query(F.data == "refresh_draft")
 async def refresh_draft_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         return
-    await call.message.edit_text("⏳ Ищем новые варианты...")
+    await call.message.edit_text("⏳ Ищем свежие варианты...")
     draft_text = await ask_gemini_market_draft()
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Одобрить", callback_data="approve_draft")],
@@ -477,7 +479,7 @@ async def admin_set_market(message: Message):
     status_msg = await message.answer("⏳ ИИ дополняет ваши матчи профессиональной аналитикой...")
     await parse_and_store_with_ai(full_text)
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
-    await status_msg.edit_text(f"✅ **Маркет на {current_date} успешно обновлен!** ИИ добавил аналитические обоснования к вашим матчам.")
+    await status_msg.edit_text(f"✅ **Маркет на {current_date} успешно обновлен!**")
     await message.answer("🛍 Витрина успешно перестроена:", reply_markup=get_dynamic_keyboard())
 
 async def background_admin_notifications():
@@ -530,7 +532,7 @@ async def main():
         admin_scope = BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню"),
-            BotCommand(command="draft", description="📋 Черновик от ИИ"),
+            BotCommand(command="draft", description="📋 Черновик на сегодня"),
             BotCommand(command="setmarket", description="🛠 Утвердить маркет")
         ], scope=admin_scope)
         await bot.set_my_commands([BotCommand(command="start", description="🏠 Главное меню")])
@@ -552,7 +554,7 @@ async def main():
             await dp.start_polling(bot, handle_signals=False)
         except Exception as e:
             logging.error(f"Polling error: {e}")
-            await asyncio.sleep(5)
+            asyncio.sleep(5)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
