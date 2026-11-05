@@ -64,41 +64,52 @@ SYSTEM_ANALYST_INSTRUCTION = """
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать матчи или использовать старые шаблоны. Всегда подбирай реальные афиши игрового дня.
 """
 
-# --- ГЕНЕРАЦИЯ КАРТИНКИ С ВОДЯНЫМ ЗНАКОМ ---
+# --- ГЕНЕРАЦИЯ КАРТИНКИ С ВОДЯНЫМ ЗНАКОМ И КИРИЛЛИЦЕЙ ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
-    """Генерирует изображение карточки прогноза с персональным водяным знаком покупателя"""
+    """Генерирует изображение карточки прогноза с поддержкой кириллицы и водяным знаком"""
     width, height = 900, 1100
     img = Image.new('RGB', (width, height), color=(15, 23, 42)) # Тёмно-синий фон
     draw = ImageDraw.Draw(img)
     
-    # Стандартный встроенный шрифт (работает на любом сервере)
-    try:
-        font_title = ImageFont.truetype("arial.ttf", 36)
-        font_text = ImageFont.truetype("arial.ttf", 24)
-        font_watermark = ImageFont.truetype("arial.ttf", 55)
-        font_small = ImageFont.truetype("arial.ttf", 18)
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-        font_watermark = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+    # Ищем системный шрифт с поддержкой кириллицы (Linux / Render)
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "arial.ttf"
+    ]
+    
+    font_title, font_text, font_watermark, font_small = None, None, None, None
+    
+    for path in font_paths:
+        try:
+            font_title = ImageFont.truetype(path, 32)
+            font_text = ImageFont.truetype(path, 22)
+            font_watermark = ImageFont.truetype(path, 50)
+            font_small = ImageFont.truetype(path, 16)
+            break
+        except Exception:
+            continue
+            
+    if not font_title:
+        font_title = font_text = font_watermark = font_small = ImageFont.load_default()
 
-    # 1. Повторяющийся диагональный водяной знак на фоне
+    # 1. Диагональный водяной знак на фоне
     watermark_label = f"LICENSED TO ID: {user_id} (@{username})"
     for y in range(100, height, 250):
         for x in range(-100, width + 300, 450):
             draw.text((x, y), watermark_label, fill=(30, 41, 59), font=font_watermark)
 
     # 2. Шапка брендинга
-    draw.rectangle([(30, 30), (width - 30, 110)], fill=(30, 58, 138))
-    draw.text((50, 50), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
+    draw.rectangle([(30, 30), (width - 30, 100)], fill=(30, 58, 138))
+    draw.text((50, 42), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
     
     # 3. Заголовок товара
-    draw.text((50, 140), title, fill=(250, 204, 21), font=font_title)
+    draw.text((50, 130), title, fill=(250, 204, 21), font=font_title)
     
-    # 4. Форматирование основного текста прогноза с переносами слов
+    # 4. Вывод текста прогноза построчно
     margin = 50
-    offset = 200
+    offset = 185
     max_width = width - (margin * 2)
     
     for paragraph in text_content.split('\n'):
@@ -106,20 +117,19 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         line = ''
         for word in words:
             test_line = line + word + ' '
-            # Оценка ширины строки
-            if len(test_line) * 12 > max_width:
+            if len(test_line) * 11 > max_width:
                 draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
-                offset += 35
+                offset += 32
                 line = word + ' '
             else:
                 line = test_line
         draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
-        offset += 40
+        offset += 38
 
     # 5. Нижняя панель защиты с лицензией клиента
-    draw.rectangle([(30, height - 100), (width - 30, height - 30)], fill=(185, 28, 28))
-    warning_text = f"🔒 Персональная лицензия: @{username} (ID: {user_id})\n⚠️ Слив/перепродажа запрещены. Система защиты BetMarket KZ."
-    draw.text((40, height - 90), warning_text, fill=(255, 255, 255), font=font_small)
+    draw.rectangle([(30, height - 90), (width - 30, height - 25)], fill=(185, 28, 28))
+    warning_text = f"Персональная лицензия: @{username} (ID: {user_id})\nСлив/перепродажа запрещены. Система защиты BetMarket KZ."
+    draw.text((40, height - 82), warning_text, fill=(255, 255, 255), font=font_small)
 
     bio = BytesIO()
     bio.name = 'prediction.png'
@@ -219,7 +229,6 @@ async def get_free_pick(call: CallbackQuery):
     username = user.username if user.username else "no_username"
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
     
-    # Генерация картинки с водяным знаком для бесплатного прогноза
     img_bio = generate_prediction_card(
         f"🎁 БЕСПЛАТНЫЙ ПРОГНОЗ ({current_date})",
         free_content,
@@ -356,11 +365,9 @@ async def grant_product_handler(call: CallbackQuery):
         pass
         
     try:
-        # Получаем данные пользователя
         target_chat = await bot.get_chat(target_user_id)
         target_username = target_chat.username if target_chat.username else "no_username"
         
-        # Генерация именного изображения с водяными знаками
         img_bio = generate_prediction_card(
             f"📦 {title}",
             prediction_text,
@@ -489,7 +496,6 @@ async def stats_handler(call: CallbackQuery):
 # --- АДМИН-ПАНЕЛЬ И УПРАВЛЕНИЕ МАРКЕТОМ ---
 
 def parse_and_store_text(text_block: str):
-    """Парсит текст черновика и автоматически раскладывает его по полочкам рынка"""
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
     APPROVED_MARKET["date"] = current_date
     APPROVED_MARKET["free"] = None
@@ -588,7 +594,6 @@ async def refresh_draft_callback(call: CallbackQuery):
 
 @router.message(Command("setmarket"))
 async def admin_set_market(message: Message):
-    """Ручное утверждение через текст"""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
         
@@ -667,7 +672,6 @@ async def web_server():
 
 async def main():
     try:
-        # Устанавливаем админские команды ТОЛЬКО для чата администратора
         admin_scope = BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню"),
@@ -675,7 +679,6 @@ async def main():
             BotCommand(command="setmarket", description="🛠 Утвердить маркет вручную текстом")
         ], scope=admin_scope)
         
-        # Для остальных пользователей оставляем только базовую команду start
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню")
         ])
