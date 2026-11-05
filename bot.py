@@ -65,8 +65,8 @@ SYSTEM_ANALYST_INSTRUCTION = """
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Выдумывать несуществующие команды, матчи или результаты.
-- Ограничиваться банальными фразами вроде "команда сильнее". Анализируй форму, xG, тренды, очные встречи и мотивацию.
-Структурируй ответы четко, без лишнего мусора.
+- Ограничиваться банальными фразами. Анализируй форму команд, тренды, очные встречи и мотивацию.
+Структурируй ответы четко и профессионально.
 """
 
 # --- ГЕНЕРАТОР ЗАЩИЩЕННЫХ КАРТОЧЕК С ВОДЯНЫМИ ЗНАКАМИ ---
@@ -145,7 +145,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     bio.seek(0)
     return bio
 
-# --- ИИ МОДУЛИ С ЗАЩИТОЙ ОТ ТАЙМ-АУТОВ ---
+# --- ИИ МОДУЛИ БЕЗ ИСКУССТВЕННЫХ ОГРАНИЧЕНИЙ ---
 async def expand_with_ai_reasoning(user_input_text: str) -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
@@ -154,14 +154,11 @@ async def expand_with_ai_reasoning(user_input_text: str) -> str:
         f"Текущая дата: {current_date_str}. "
         f"Администратор зафиксировал прогноз: '{user_input_text}'. "
         f"Напиши детальное профессиональное аналитическое обоснование к этому матчу. "
-        f"Разбери текущую форму команд, статистику последних игр и мотивацию. Сделай текст готовым к публикации."
+        f"Разбери форму команд, статистику и мотивацию. Сделай текст готовым к публикации."
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt),
-            timeout=25.0
-        )
+        response = await asyncio.to_thread(model.generate_content, prompt)
         ai_text = response.text.strip()
         return f"{user_input_text}\n\n💡 Экспертная аналитика:\n{ai_text}"
     except Exception as e:
@@ -173,31 +170,28 @@ async def fetch_todays_schedule() -> str:
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
-        f"Сегодня {current_date_str}. Составь афишу главных матчей на сегодня строго по категориям:\n"
+        f"Сегодня {current_date_str}. Составь актуальное расписание главных матчей на сегодня строго по категориям:\n"
         f"1. ⚽ Футбол (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ/ЛЕ/ЛК)\n"
         f"2. 🏒 Хоккей (КХЛ, НХЛ)\n"
         f"3. 🏀 Баскетбол (НБА)\n"
-        f"Выдай аккуратный список без лишней информации."
+        f"Выдай реальные вывески матчей без лишней воды."
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt),
-            timeout=25.0
-        )
+        response = await asyncio.to_thread(model.generate_content, prompt)
         text = response.text.strip()
         LAST_GENERATED_SCHEDULE["text"] = text
-        return f"🏟 **ПОЛНОЕ РАСПИСАНИЕ МАТЧЕЙ ({current_date_str}):**\n\n{text}"
+        return f"🏟 **АКТУАЛЬНОЕ РАСПИСАНИЕ ({current_date_str}):**\n\n{text}"
     except Exception as e:
         logging.error(f"Schedule error: {e}")
-        return "⚠️ Не удалось загрузить расписание. Нажмите кнопку «Обновить»."
+        return f"⚠️ Ошибка загрузки расписания: {e}"
 
 async def ask_gemini_market_draft() -> str:
     almaty_time = datetime.now(timezone(timedelta(hours=5)))
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
-        f"Сегодня {current_date_str}. Сформируй готовый черновик линии по топ-лигам (Футбол, КХЛ/НХЛ, НБА):\n"
+        f"Сегодня {current_date_str}. Сформируй профессиональный черновик спортивной линии по топ-лигам (Футбол, КХЛ/НХЛ, НБА):\n"
         f"Бесплатный прогноз: [Матч, ставка, кэф и короткий разбор]\n"
         f"Ординар: [Матч дня, ставка, кэф и обоснование]\n"
         f"Экспресс: [2 матча с общим кэфом 2.0-3.0]\n"
@@ -205,23 +199,13 @@ async def ask_gemini_market_draft() -> str:
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt),
-            timeout=25.0
-        )
+        response = await asyncio.to_thread(model.generate_content, prompt)
         text = response.text.strip()
         LAST_GENERATED_DRAFT["text"] = text
-        return f"📅 Черновик линии на {current_date_str}:\n\n{text}"
+        return f"📅 **Черновик линии на {current_date_str}:**\n\n{text}"
     except Exception as e:
         logging.error(f"Draft error: {e}")
-        fallback_text = (
-            "Бесплатный прогноз: Топ-Матч Дня. ТБ (2.5) кф 1.75\n"
-            "Ординар: НХЛ / КХЛ. Победа в основном времени кф 1.85\n"
-            "Экспресс: НБА / Еврокубки. Общий кэф 2.40\n"
-            "Хай-кэф: Высокий коэффициент на андердога кф 4.10"
-        )
-        LAST_GENERATED_DRAFT["text"] = fallback_text
-        return f"📅 Черновик линии на сегодня (Резервный шаблон):\n\n{fallback_text}"
+        return f"⚠️ Ошибка генерации черновика: {e}"
 
 # --- КЛАВИАТУРЫ ---
 def get_dynamic_keyboard():
@@ -262,7 +246,7 @@ async def start_cmd(message: Message):
         pass
     welcome_text = (
         "👋 **Добро пожаловать в BetMarket KZ!**\n\n"
-        "Официальный маркетплейс авторитетной спортивной аналитики.\n"
+        "Официальный маркетплейс спортивной аналитики.\n"
         "Каждый прогноз выпускается в виде **персональной защищенной карточки** с вашим уникальным ID."
     )
     await message.answer(welcome_text, reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
@@ -306,7 +290,7 @@ async def select_item(call: CallbackQuery):
     text = (
         f"📦 **Товар:** {name}\n"
         f"💳 **К оплате:** {price_kz} ₸ или {stars} Telegram Stars ⭐\n\n"
-        f"Выберите наиболее удобный способ мгновенной оплаты:"
+        f"Выберите способ оплаты:"
     )
     pay_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"💳 Kaspi QR / Перевод ({price_kz} ₸)", callback_data=f"pay_kaspi_{item_code}")],
@@ -327,7 +311,7 @@ async def pay_kaspi(call: CallbackQuery):
         f"Позиция: **{name}**\n"
         f"Сумма: **{price_kz} ₸**\n"
         f"Реквизиты карты: `{KASPI_CARD}`\n\n"
-        f"📸 **После перевода отправьте скриншот чека в этот чат.** Бот автоматически перенаправит его на проверку."
+        f"📸 **После перевода отправьте скриншот чека в этот чат.**"
     )
     kaspi_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")]])
     await call.message.edit_text(text, reply_markup=kaspi_kb, parse_mode="Markdown")
@@ -347,7 +331,7 @@ async def handle_receipt_photo(message: Message):
         [InlineKeyboardButton(text="❌ Отклонить чек", callback_data=f"reject_user_{user.id}")]
     ])
     await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=photo, caption=caption, reply_markup=admin_kb)
-    await message.answer("✅ Чек передан администратору! Выдача произойдет в течение 1-3 минут.")
+    await message.answer("✅ Чек передан администратору!")
 
 @router.callback_query(F.data.startswith("grant_"))
 async def grant_product_handler(call: CallbackQuery):
@@ -368,7 +352,7 @@ async def grant_product_handler(call: CallbackQuery):
         img_bio = generate_prediction_card(f"📦 {title}", prediction_text, target_user_id, target_username)
         input_file = BufferedInputFile(img_bio.getvalue(), filename="paid.png")
         
-        await bot.send_photo(chat_id=target_user_id, photo=input_file, caption="🎉 **Оплата подтверждена!** Ваш персональный прогнозно-аналитический документ:")
+        await bot.send_photo(chat_id=target_user_id, photo=input_file, caption="🎉 **Оплата подтверждена!** Ваш персональный документ:")
         await bot.send_message(target_user_id, "🛍 Главное меню:", reply_markup=get_dynamic_keyboard())
         await call.answer("Выдано!")
     except Exception as e:
@@ -380,12 +364,12 @@ async def admin_reject_callback(call: CallbackQuery):
         return
     target_user_id = int(call.data.replace("reject_user_", ""))
     try:
-        await bot.send_message(chat_id=target_user_id, text="❌ Ваш чек не прошёл проверку. Свяжитесь со службой поддержки.")
+        await bot.send_message(chat_id=target_user_id, text="❌ Ваш чек не прошёл проверку.")
     except Exception:
         pass
     await call.answer("Отклонено.")
 
-# --- АВТОМАТИЧЕСКАЯ ОПЛАТА ЧЕРЕЗ TELEGRAM STARS ---
+# --- TELEGRAM STARS ОПЛАТА ---
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     item_code = call.data.replace("pay_stars_", "")
@@ -396,7 +380,7 @@ async def pay_stars(call: CallbackQuery):
     await call.message.delete()
     await call.message.answer_invoice(
         title=name, 
-        description=f"Мгновенный доступ к {name} в BetMarket KZ", 
+        description=f"Мгновенный доступ к {name}", 
         prices=prices,
         provider_token="", 
         payload=f"order_{item_code}", 
@@ -428,32 +412,30 @@ async def success_payment(message: Message):
 async def profile_handler(call: CallbackQuery):
     user = call.from_user
     text = (
-        f"👤 **Профиль пользователя:**\n\n"
-        f"🆔 Telegram ID: `{user.id}`\n"
+        f"👤 **Профиль:**\n\n"
+        f"🆔 ID: `{user.id}`\n"
         f"👤 Имя: {user.first_name}\n"
-        f"Юзернейм: @{user.username or 'отсутствует'}\n"
-        f"Статус: Активный покупатель 💎"
+        f"Username: @{user.username or 'отсутствует'}"
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]]), parse_mode="Markdown")
 
 @router.callback_query(F.data == "stats")
 async def stats_handler(call: CallbackQuery):
     stat_text = (
-        "📊 **Аудированная статистика BetMarket KZ:**\n\n"
-        "🎯 Средняя проходимость ординаров: **74.2%**\n"
-        "🔥 Средняя проходимость экспрессов: **62.8%**\n"
-        "📈 Средний чистый ROI в месяц: **+19.1%**\n\n"
-        "Все прогнозы верифицированы администрацией."
+        "📊 **Статистика BetMarket KZ:**\n\n"
+        "🎯 Проходимость ординаров: **74.2%**\n"
+        "🔥 Проходимость экспрессов: **62.8%**\n"
+        "📈 ROI: **+19.1%**"
     )
     await call.message.edit_text(stat_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]]), parse_mode="Markdown")
 
-# --- ПАНЕЛЬ УПРАВЛЕНИЯ АДМИНИСТРАТОРА (КОМАНДЫ-ПОМОЩНИКИ) ---
+# --- АДМИН-КОМАНДЫ ---
 
 @router.message(Command("schedule"))
 async def admin_get_schedule(message: Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         return
-    status_msg = await message.answer("⏳ *ИИ сканирует расписание по Футбол/КХЛ/НХЛ/НБА...*", parse_mode="Markdown")
+    status_msg = await message.answer("⏳ *ИИ сканирует расписание по футболу, КХЛ, НХЛ и НБА...*", parse_mode="Markdown")
     schedule_text = await fetch_todays_schedule()
     
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -479,24 +461,21 @@ async def run_auto_analyze_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         return
     
-    base_schedule = LAST_GENERATED_SCHEDULE.get("text", "Все матчи дня по футболу, хоккею и баскетболу.")
-    await call.message.edit_text("⏳ *ИИ делает глубинную аналитику по расписанию...*", parse_mode="Markdown")
+    base_schedule = LAST_GENERATED_SCHEDULE.get("text", "Главные матчи дня.")
+    await call.message.edit_text("⏳ *ИИ делает глубинную аналитику...*", parse_mode="Markdown")
     
     prompt = (
         f"На основе этого расписания подбери лучшие варианты ставок и сделай глубокий анализ:\n\n{base_schedule}\n\n"
         f"Структура ответа:\n"
         f"Бесплатный прогноз: [Матч, ставка, кэф и разбор]\n"
-        f"Ординар: [Матч, ставка, кэф и аналитическое обоснование]\n"
+        f"Ординар: [Матч, ставка, кэф и обоснование]\n"
         f"Экспресс: [2 матча с общим кэфом 2.0-3.0]\n"
         f"Хай-кэф: [Матч с высоким кэфом от 4.0]"
     )
     
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt),
-            timeout=30.0
-        )
+        response = await asyncio.to_thread(model.generate_content, prompt)
         analyzed_text = response.text.strip()
         LAST_GENERATED_DRAFT["text"] = analyzed_text
         
@@ -507,7 +486,7 @@ async def run_auto_analyze_callback(call: CallbackQuery):
         await call.message.edit_text(f"📊 **Экспертный разбор ИИ:**\n\n{analyzed_text}", reply_markup=admin_kb, parse_mode="Markdown")
     except Exception as e:
         logging.error(f"Analyze error: {e}")
-        await call.message.edit_text("⚠️ Ошибка анализа. Попробуйте ещё раз.")
+        await call.message.edit_text("⚠️ Ошибка анализа.")
 
 @router.message(Command("analyze"))
 async def admin_analyze_custom(message: Message):
@@ -572,13 +551,13 @@ async def parse_and_store_with_ai(text_block: str):
 async def admin_get_draft(message: Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         return
-    await message.answer("⏳ *ИИ формирует вариант черновика...*", parse_mode="Markdown")
+    status_msg = await message.answer("⏳ *ИИ формирует черновик линии...*", parse_mode="Markdown")
     draft_text = await ask_gemini_market_draft()
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Одобрить черновик", callback_data="approve_draft")],
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh_draft")]
     ])
-    await message.answer(f"📋 **Черновик на сегодня:**\n\n{draft_text}", reply_markup=admin_kb, parse_mode="Markdown")
+    await status_msg.edit_text(f"📋 **Черновик на сегодня:**\n\n{draft_text}", reply_markup=admin_kb, parse_mode="Markdown")
 
 @router.callback_query(F.data == "approve_draft")
 async def approve_draft_callback(call: CallbackQuery):
@@ -607,7 +586,7 @@ async def admin_set_market(message: Message):
         return
     full_text = message.text.replace("/setmarket", "").strip()
     if not full_text:
-        await message.answer("⚠️ Напишите ваши матчи после команды `/setmarket`.\nПример:\n`/setmarket Ординар: Флорида - Чикаго П1 кф 1.8`", parse_mode="Markdown")
+        await message.answer("⚠️ Напишите ваши матчи после команды `/setmarket`.", parse_mode="Markdown")
         return
         
     status_msg = await message.answer("⏳ ИИ дополняет ваши матчи глубокой аналитикой...")
