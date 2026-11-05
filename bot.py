@@ -50,31 +50,25 @@ APPROVED_MARKET = {
 }
 
 LAST_GENERATED_DRAFT = {"text": ""}
+LAST_GENERATED_SCHEDULE = {"text": ""}
 
-PRODUCTS_BASE = {
-    "ordinary": {"name": "🎯 Ординар", "price_kz": 1500, "stars": 50},
-    "express": {"name": "🔥 Экспресс 2-3", "price_kz": 2500, "stars": 80},
-    "high_odds": {"name": "💣 Хай-Кэф", "price_kz": 4000, "stars": 130},
-}
-
-# --- СТРОГИЕ ИНСТРУКЦИИ ДЛЯ ИИ (АКТУАЛЬНЫЕ МАТЧИ ТОП-ЛИГ) ---
+# --- ПОЛНЫЕ ИНСТРУКЦИИ ДЛЯ ВСЕХ ТОП-ЛИГ ---
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
-Твоя главная задача — выдавать СТРОГО АКТУАЛЬНЫЕ И РЕАЛЬНЫЕ матчи на текущую дату.
-СПЕЦИАЛИЗАЦИЯ:
-⚽ Футбол: Топ-5 лиг Европы (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1) + Еврокубки (ЛЧ, ЛЕ, ЛК).
-🏒 Хоккей: КХЛ, НХЛ.
-🏀 Баскетбол: НБА.
+Твоя задача — выдавать СТРОГО АКТУАЛЬНЫЕ И РЕАЛЬНЫЕ матчи на текущую дату по ВСЕМ ключевым направлениям:
+⚽ ФУТБОЛ (Топ-5 лиг: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1 + Еврокубки: ЛЧ, ЛЕ, ЛК).
+🏒 ХОККЕЙ (КХЛ, НХЛ).
+🏀 БАСКЕТБОЛ (НБА).
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Выдумывать матчи, команды или счета.
-- Использовать матчи из прошлых или будущих дней (игра должна проходить ровно в дату запроса).
-Если на сегодня в указанных лиге/виде спорта нет матчей, так и пиши. Бери только реальную спортивную линию дня.
+- Использовать матчи из прошлых или будущих дней.
+Пиши авторитетным языком профессионального каппера с глубоким разбором формы команд и статистики.
 """
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1100
-    img = Image.new('RGB', (width, height), color=(15, 23, 42)) # Тёмно-синий фон
+    img = Image.new('RGB', (width, height), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
     
     font_paths = [
@@ -98,7 +92,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     if not font_title:
         font_title = font_text = font_watermark = font_small = ImageFont.load_default()
 
-    # Слой водяных знаков с чередованием строк (ID на одной, Ник на другой)
+    # Водяные знаки с чередованием строк (ID / Ник)
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     
@@ -112,14 +106,10 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
-    # Шапка брендинга
     draw.rectangle([(30, 30), (width - 30, 90)], fill=(30, 58, 138))
     draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
-    
-    # Заголовок товара
     draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
     
-    # Текст прогноза и аналитики
     margin = 50
     offset = 165
     max_width = width - (margin * 2)
@@ -138,7 +128,6 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
         offset += 30
 
-    # Нижняя панель защиты
     draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id}) | Защита BetMarket KZ"
     draw.text((40, height - 72), warning_text, fill=(255, 255, 255), font=font_small)
@@ -155,15 +144,15 @@ async def expand_with_ai_reasoning(user_input_text: str) -> str:
     
     prompt = (
         f"Текущая дата: {current_date_str}. "
-        f"Администратор указал следующий прогноз: '{user_input_text}'. "
-        f"Напиши профессиональное спортивное обоснование и аналитику по матчу, опираясь на текущую форму команд на дату {current_date_str}. "
-        f"Сделай текст развернутым, авторитетным и готовым для публикации."
+        f"Администратор указал прогноз: '{user_input_text}'. "
+        f"Напиши профессиональное спортивное обоснование и аналитику по матчу (Топ-5 лиг, ЛЧ/ЛЕ/ЛК, КХЛ, НХЛ, НБА), опираясь на текущую форму команд. "
+        f"Сделай текст развернутым и качественным."
     )
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, prompt),
-            timeout=25.0  # Увеличен тайм-аут
+            timeout=25.0
         )
         ai_text = response.text.strip()
         return f"{user_input_text}\n\n💡 Экспертная аналитика:\n{ai_text}"
@@ -176,27 +165,58 @@ async def ask_gemini_market_draft() -> str:
     current_date_str = almaty_time.strftime("%d.%m.%Y")
     
     prompt = (
-        f"СЕГОДНЯШНЯЯ ДАТА: {current_date_str}. "
-        f"Составь утреннюю подборку матчей, которые играются РОВНО СЕГОДНЯ ({current_date_str}) по топ-лигам (Футбол: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ/ЛЕ/ЛК; Хоккей: КХЛ, НХЛ; Баскетбол: НБА). "
-        f"Предложи варианты с детальным обоснованием:\n"
-        f"Бесплатный прогноз: [Точный матч на сегодня, ставка, кэф и анализ]\n"
-        f"Ординар: [Точный матч на сегодня, ставка, кэф и аналитическое обоснование]\n"
-        f"Экспресс: [2 реальных матча на сегодня с общим кэфом 2.0-3.0 и обоснованием]\n"
-        f"Хай-кэф: [Реальные матчи на сегодня с высоким кэфом от 4.0 и обоснованием]"
+        f"Сегодня {current_date_str}. Составь утреннюю подборку матчей по ВСЕМ ключевым лигам "
+        f"(Футбол: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ, ЛЕ, ЛК; Хоккей: КХЛ, НХЛ; Баскетбол: НБА):\n"
+        f"Бесплатный прогноз: [Матч, ставка, кэф и анализ]\n"
+        f"Ординар: [Матч, ставка, кэф и аналитическое обоснование]\n"
+        f"Экспресс: [2 матча с общим кэфом 2.0-3.0 и обоснованием]\n"
+        f"Хай-кэф: [Матчи с высоким кэфом от 4.0 и обоснованием]"
     )
     
     try:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, prompt),
-            timeout=25.0  # Увеличен тайм-аут до 25 секунд
+            timeout=25.0
         )
         text = response.text.strip()
         LAST_GENERATED_DRAFT["text"] = text
-        return f"📅 Линия на сегодня: {current_date_str}\n\n{text}"
+        return f"📅 Линия на {current_date_str}:\n\n{text}"
     except Exception as e:
         logging.error(f"Draft error: {e}")
-        return "⚠️ Не удалось сгенерировать черновик. Попробуйте еще раз."
+        fallback_text = (
+            "Бесплатный прогноз: АПЛ / Ла Лига. Матч дня. ТБ (2.5) кф 1.80\n"
+            "Ординар: НХЛ / КХЛ. Топовый матч. Победа 1 кф 1.70\n"
+            "Экспресс: НБА. Два матча в экспрессе. Кэф 2.35\n"
+            "Хай-кэф: Футбол / Хоккей. Андердог матч, кэф 4.50"
+        )
+        LAST_GENERATED_DRAFT["text"] = fallback_text
+        return f"📅 Линия на сегодня (Резервный шаблон):\n\n{fallback_text}"
+
+# --- РАСПИСАНИЕ ПО ВСЕМ ТОП-ЛИГАМ, КХЛ, НХЛ, НБА ---
+async def fetch_todays_schedule() -> str:
+    almaty_time = datetime.now(timezone(timedelta(hours=5)))
+    current_date_str = almaty_time.strftime("%d.%m.%Y")
+    
+    prompt = (
+        f"Сегодня {current_date_str}. Составь полное расписание и список главных матчей на сегодня строго по всем категориям:\n"
+        f"1. ⚽ Футбол (Топ-5 лиг: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1 + Еврокубки ЛЧ, ЛЕ, ЛК)\n"
+        f"2. 🏒 Хоккей (КХЛ, НХЛ)\n"
+        f"3. 🏀 Баскетбол (НБА)\n"
+        f"Выдай структурированный и удобный список афиш матчей."
+    )
+    try:
+        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
+        response = await asyncio.wait_for(
+            asyncio.to_thread(model.generate_content, prompt),
+            timeout=25.0
+        )
+        text = response.text.strip()
+        LAST_GENERATED_SCHEDULE["text"] = text
+        return f"🏟 **ПОЛНОЕ РАСПИСАНИЕ НА СЕГОДНЯ ({current_date_str}):**\n\n{text}"
+    except Exception as e:
+        logging.error(f"Schedule error: {e}")
+        return "⚠️ Не удалось загрузить расписание. Попробуйте еще раз."
 
 def get_dynamic_keyboard():
     keyboard = []
@@ -233,7 +253,7 @@ async def start_cmd(message: Message):
         await message.delete()
     except Exception:
         pass
-    await message.answer("👋 **Добро пожаловать в BetMarket KZ!**\nОфициальный маркетплейс точных спортивных прогнозов.", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
+    await message.answer("👋 **Добро пожаловать в BetMarket KZ!**", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "main_menu")
 async def back_to_main(call: CallbackQuery):
@@ -386,7 +406,84 @@ async def profile_handler(call: CallbackQuery):
 async def stats_handler(call: CallbackQuery):
     await call.message.edit_text("📊 Проходимость: 74.2%\nROI: +19.1%", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]]))
 
-# --- АДМИН-ПАНЕЛЬ С АВТО-АНАЛИЗОМ ---
+# --- АДМИН-ПАНЕЛЬ: /schedule И /analyze ---
+
+@router.message(Command("schedule"))
+async def admin_get_schedule(message: Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    status_msg = await message.answer("⏳ *ИИ собирает расписание матчей (Топ-5 лиг, ЛЕ/ЛК/ЛЧ, КХЛ, НХЛ, НБА)...*", parse_mode="Markdown")
+    schedule_text = await fetch_todays_schedule()
+    
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Сделать полный анализ матчей", callback_data="run_auto_analyze")],
+        [InlineKeyboardButton(text="🔄 Обновить расписание", callback_data="refresh_schedule")]
+    ])
+    await status_msg.edit_text(schedule_text, reply_markup=admin_kb, parse_mode="Markdown")
+
+@router.callback_query(F.data == "refresh_schedule")
+async def refresh_schedule_callback(call: CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        return
+    await call.message.edit_text("⏳ Обновляем расписание...")
+    schedule_text = await fetch_todays_schedule()
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Сделать полный анализ матчей", callback_data="run_auto_analyze")],
+        [InlineKeyboardButton(text="🔄 Обновить расписание", callback_data="refresh_schedule")]
+    ])
+    await call.message.edit_text(schedule_text, reply_markup=admin_kb, parse_mode="Markdown")
+
+@router.callback_query(F.data == "run_auto_analyze")
+async def run_auto_analyze_callback(call: CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        return
+    
+    base_schedule = LAST_GENERATED_SCHEDULE.get("text", "")
+    if not base_schedule:
+        base_schedule = "Все топ-лиги футбола, КХЛ, НХЛ, НБА — главные матчи дня."
+
+    await call.message.edit_text("⏳ *ИИ проводит глубокий экспертный анализ по всему расписанию...*", parse_mode="Markdown")
+    
+    prompt = (
+        f"На основе следующего расписания сделай детальный экспертный анализ и выдели лучшие варианты для ставок:\n\n"
+        f"{base_schedule}\n\n"
+        f"Сформируй ответ строго по структуре:\n"
+        f"Бесплатный прогноз: [Матч, ставка, кэф и анализ]\n"
+        f"Ординар: [Матч, ставка, кэф и аналитическое обоснование]\n"
+        f"Экспресс: [2 матча с общим кэфом 2.0-3.0 и обоснованием]\n"
+        f"Хай-кэф: [Матч с высоким кэфом от 4.0 и обоснованием]"
+    )
+    
+    try:
+        model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
+        response = await asyncio.wait_for(
+            asyncio.to_thread(model.generate_content, prompt),
+            timeout=30.0
+        )
+        analyzed_text = response.text.strip()
+        LAST_GENERATED_DRAFT["text"] = analyzed_text
+        
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Одобрить и выгрузить на витрину", callback_data="approve_draft")],
+            [InlineKeyboardButton(text="🔄 Переанализировать", callback_data="run_auto_analyze")]
+        ])
+        await call.message.edit_text(f"📊 **Результаты глубокого анализа ИИ:**\n\n{analyzed_text}", reply_markup=admin_kb, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Analyze error: {e}")
+        await call.message.edit_text("⚠️ Ошибка при анализе матчей. Попробуйте еще раз.")
+
+@router.message(Command("analyze"))
+async def admin_analyze_custom(message: Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    full_text = message.text.replace("/analyze", "").strip()
+    if not full_text:
+        await message.answer("⚠️ Напишите матч после команды `/analyze`. Например:\n`/analyze НХЛ: Флорида - Чикаго`", parse_mode="Markdown")
+        return
+        
+    status_msg = await message.answer("⏳ ИИ выполняет детальный аналитический разбор...")
+    expanded = await expand_with_ai_reasoning(full_text)
+    await status_msg.edit_text(f"💡 **Экспертный разбор:**\n\n{expanded}")
 
 async def parse_and_store_with_ai(text_block: str):
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
@@ -438,7 +535,7 @@ async def parse_and_store_with_ai(text_block: str):
 async def admin_get_draft(message: Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         return
-    await message.answer("⏳ *ИИ анализирует матчи на сегодня по топ-лигам...*", parse_mode="Markdown")
+    await message.answer("⏳ *ИИ формирует черновик по топ-лигам...*", parse_mode="Markdown")
     draft_text = await ask_gemini_market_draft()
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Одобрить черновик", callback_data="approve_draft")],
@@ -453,7 +550,7 @@ async def approve_draft_callback(call: CallbackQuery):
     text_to_parse = LAST_GENERATED_DRAFT.get("text", "Ординар: Матч дня")
     await call.message.edit_text("⏳ Обрабатываем и добавляем аналитику...")
     await parse_and_store_with_ai(text_to_parse)
-    await call.message.edit_text("✅ **Черновик одобрен!** Витрина обновлена актуальными данными.")
+    await call.message.edit_text("✅ **Черновик одобрен!** Витрина обновлена.")
 
 @router.callback_query(F.data == "refresh_draft")
 async def refresh_draft_callback(call: CallbackQuery):
@@ -473,7 +570,7 @@ async def admin_set_market(message: Message):
         return
     full_text = message.text.replace("/setmarket", "").strip()
     if not full_text:
-        await message.answer("⚠️ Напишите текст после команды `/setmarket`. Например:\n`/setmarket Ординар: Флорида-Чикаго П1 кф 1.7`")
+        await message.answer("⚠️ Напишите текст после команды `/setmarket`.")
         return
         
     status_msg = await message.answer("⏳ ИИ дополняет ваши матчи профессиональной аналитикой...")
@@ -532,7 +629,9 @@ async def main():
         admin_scope = BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню"),
-            BotCommand(command="draft", description="📋 Черновик на сегодня"),
+            BotCommand(command="schedule", description="🏟 Расписание на сегодня"),
+            BotCommand(command="analyze", description="📊 Анализ матчей"),
+            BotCommand(command="draft", description="📋 Черновик линии"),
             BotCommand(command="setmarket", description="🛠 Утвердить маркет")
         ], scope=admin_scope)
         await bot.set_my_commands([BotCommand(command="start", description="🏠 Главное меню")])
