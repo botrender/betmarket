@@ -22,7 +22,7 @@ from aiogram.types import (
 import google.generativeai as genai
 from PIL import Image, ImageDraw, ImageFont
 
-# --- НАСТРОЙКИ И КОНФИгурация ---
+# --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
 BOT_TOKEN = "9229154481:AAEQDxNsKv7mN6mH3wwMLOHuxV90h5fsjNs"
 
 part1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
@@ -163,7 +163,7 @@ async def expand_with_ai_reasoning(user_input_text: str) -> str:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, prompt),
-            timeout=15.0
+            timeout=25.0  # Увеличен тайм-аут
         )
         ai_text = response.text.strip()
         return f"{user_input_text}\n\n💡 Экспертная аналитика:\n{ai_text}"
@@ -177,7 +177,7 @@ async def ask_gemini_market_draft() -> str:
     
     prompt = (
         f"СЕГОДНЯШНЯЯ ДАТА: {current_date_str}. "
-        f"Составь утреннюю подборку матчей, которые играются РОВНО СЕГОДНЯ ({current_date_str}) по топ-лигам (Футбол: топ-5, ЛЧ/ЛЕ/ЛК; Хоккей: КХЛ, НХЛ; Баскетбол: НБА). "
+        f"Составь утреннюю подборку матчей, которые играются РОВНО СЕГОДНЯ ({current_date_str}) по топ-лигам (Футбол: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ/ЛЕ/ЛК; Хоккей: КХЛ, НХЛ; Баскетбол: НБА). "
         f"Предложи варианты с детальным обоснованием:\n"
         f"Бесплатный прогноз: [Точный матч на сегодня, ставка, кэф и анализ]\n"
         f"Ординар: [Точный матч на сегодня, ставка, кэф и аналитическое обоснование]\n"
@@ -189,14 +189,14 @@ async def ask_gemini_market_draft() -> str:
         model = genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM_ANALYST_INSTRUCTION)
         response = await asyncio.wait_for(
             asyncio.to_thread(model.generate_content, prompt),
-            timeout=15.0
+            timeout=25.0  # Увеличен тайм-аут до 25 секунд
         )
         text = response.text.strip()
         LAST_GENERATED_DRAFT["text"] = text
         return f"📅 Линия на сегодня: {current_date_str}\n\n{text}"
     except Exception as e:
         logging.error(f"Draft error: {e}")
-        return "⚠️ Не удалось сгенерировать черновик."
+        return "⚠️ Не удалось сгенерировать черновик. Попробуйте еще раз."
 
 def get_dynamic_keyboard():
     keyboard = []
@@ -554,7 +554,7 @@ async def main():
             await dp.start_polling(bot, handle_signals=False)
         except Exception as e:
             logging.error(f"Polling error: {e}")
-            asyncio.sleep(5)
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
