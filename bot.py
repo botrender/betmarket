@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 import os
+from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from aiohttp import web
 import aiohttp
@@ -14,9 +15,12 @@ from aiogram.types import (
     CallbackQuery,
     LabeledPrice,
     PreCheckoutQuery,
-    BotCommand
+    BotCommand,
+    BotCommandScopeChat,
+    BufferedInputFile
 )
 import google.generativeai as genai
+from PIL import Image, ImageDraw, ImageFont
 
 # --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
 BOT_TOKEN = "9229154481:AAEQDxNsKv7mN6mH3wwMLOHuxV90h5fsjNs"
@@ -36,7 +40,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 
-# Хранилище утвержденного рынка и последнего чернового варианта от ИИ
+# Хранилище утвержденного рынка и последнего чернового варианта
 APPROVED_MARKET = {
     "date": "",
     "free": None,
@@ -59,6 +63,69 @@ SYSTEM_ANALYST_INSTRUCTION = """
 Формируй актуальную подборку реальных матчей топ-лиг (Футбол: Лига Чемпионов, топ-5 чемпионатов; Хоккей: НХЛ; Баскетбол: НБА) на текущую дату.
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать матчи или использовать старые шаблоны. Всегда подбирай реальные афиши игрового дня.
 """
+
+# --- ГЕНЕРАЦИЯ КАРТИНКИ С ВОДЯНЫМ ЗНАКОМ ---
+def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
+    """Генерирует изображение карточки прогноза с персональным водяным знаком покупателя"""
+    width, height = 900, 1100
+    img = Image.new('RGB', (width, height), color=(15, 23, 42)) # Тёмно-синий фон
+    draw = ImageDraw.Draw(img)
+    
+    # Стандартный встроенный шрифт (работает на любом сервере)
+    try:
+        font_title = ImageFont.truetype("arial.ttf", 36)
+        font_text = ImageFont.truetype("arial.ttf", 24)
+        font_watermark = ImageFont.truetype("arial.ttf", 55)
+        font_small = ImageFont.truetype("arial.ttf", 18)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+        font_watermark = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # 1. Повторяющийся диагональный водяной знак на фоне
+    watermark_label = f"LICENSED TO ID: {user_id} (@{username})"
+    for y in range(100, height, 250):
+        for x in range(-100, width + 300, 450):
+            draw.text((x, y), watermark_label, fill=(30, 41, 59), font=font_watermark)
+
+    # 2. Шапка брендинга
+    draw.rectangle([(30, 30), (width - 30, 110)], fill=(30, 58, 138))
+    draw.text((50, 50), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
+    
+    # 3. Заголовок товара
+    draw.text((50, 140), title, fill=(250, 204, 21), font=font_title)
+    
+    # 4. Форматирование основного текста прогноза с переносами слов
+    margin = 50
+    offset = 200
+    max_width = width - (margin * 2)
+    
+    for paragraph in text_content.split('\n'):
+        words = paragraph.split(' ')
+        line = ''
+        for word in words:
+            test_line = line + word + ' '
+            # Оценка ширины строки
+            if len(test_line) * 12 > max_width:
+                draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
+                offset += 35
+                line = word + ' '
+            else:
+                line = test_line
+        draw.text((margin, offset), line, fill=(241, 245, 249), font=font_text)
+        offset += 40
+
+    # 5. Нижняя панель защиты с лицензией клиента
+    draw.rectangle([(30, height - 100), (width - 30, height - 30)], fill=(185, 28, 28))
+    warning_text = f"🔒 Персональная лицензия: @{username} (ID: {user_id})\n⚠️ Слив/перепродажа запрещены. Система защиты BetMarket KZ."
+    draw.text((40, height - 90), warning_text, fill=(255, 255, 255), font=font_small)
+
+    bio = BytesIO()
+    bio.name = 'prediction.png'
+    img.save(bio, 'PNG')
+    bio.seek(0)
+    return bio
 
 async def ask_gemini_market_draft() -> str:
     """Генерация утреннего черновика подборки матчей для админа"""
@@ -149,15 +216,26 @@ async def get_free_pick(call: CallbackQuery):
         return
         
     user = call.from_user
-    username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
-    watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая или получая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
-    
+    username = user.username if user.username else "no_username"
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
-    report = f"🎁 **БЕСПЛАТНЫЙ ПРОГНОЗ НА {current_date}**\n\n{free_content}{watermark}"
     
+    # Генерация картинки с водяным знаком для бесплатного прогноза
+    img_bio = generate_prediction_card(
+        f"🎁 БЕСПЛАТНЫЙ ПРОГНОЗ ({current_date})",
+        free_content,
+        user.id,
+        username
+    )
+    
+    input_file = BufferedInputFile(img_bio.getvalue(), filename="free_prediction.png")
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В главное меню", callback_data="main_menu")]])
-    await call.message.edit_text(report, reply_markup=back_kb, parse_mode="Markdown")
-    await call.message.answer("👇 Вы можете продолжить выбор в главном меню:", reply_markup=get_dynamic_keyboard())
+    
+    await call.message.answer_photo(
+        photo=input_file,
+        caption=f"🎁 **Ваш бесплатный прогноз на {current_date}!**\n\nКарточка с защитным водяным знаком сформирована специально для вас.",
+        reply_markup=back_kb,
+        parse_mode="Markdown"
+    )
 
 @router.callback_query(F.data.startswith("item_"))
 async def select_item(call: CallbackQuery):
@@ -259,10 +337,15 @@ async def grant_product_handler(call: CallbackQuery):
         
     prediction_content = APPROVED_MARKET.get(product_code)
     if not prediction_content:
-        prediction_content = "Эксклюзивный прогноз на выбранное событие."
+        prediction_text = "Эксклюзивный прогноз на выбранное событие."
+        title = "ПРЕМИУМ ПРОГНОЗ"
     else:
         if isinstance(prediction_content, dict):
-            prediction_content = prediction_content.get("content", "Материал доступен в маркетплейсе.")
+            prediction_text = prediction_content.get("content", "Материал доступен в маркетплейсе.")
+            title = prediction_content.get("name", "ПЛАТНЫЙ ПРОГНОЗ").upper()
+        else:
+            prediction_text = str(prediction_content)
+            title = "ПЛАТНЫЙ ПРОГНОЗ"
 
     try:
         await call.message.edit_caption(
@@ -273,15 +356,27 @@ async def grant_product_handler(call: CallbackQuery):
         pass
         
     try:
-        watermark = f"\n\n---\n🔒 *Персональная лицензия для ID: {target_user_id}*\n⚠️ Покупая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
+        # Получаем данные пользователя
+        target_chat = await bot.get_chat(target_user_id)
+        target_username = target_chat.username if target_chat.username else "no_username"
         
-        await bot.send_message(
+        # Генерация именного изображения с водяными знаками
+        img_bio = generate_prediction_card(
+            f"📦 {title}",
+            prediction_text,
+            target_user_id,
+            target_username
+        )
+        input_file = BufferedInputFile(img_bio.getvalue(), filename="paid_prediction.png")
+        
+        await bot.send_photo(
             chat_id=target_user_id,
-            text=f"🎉 **Ваша оплата подтверждена администратором!**\n\n📦 Ваш материал:\n\n{prediction_content}{watermark}",
+            photo=input_file,
+            caption=f"🎉 **Ваша оплата подтверждена!**\n\nПрогноз сформирован с защитным водяным знаком вашего профиля.",
             parse_mode="Markdown"
         )
         await bot.send_message(target_user_id, "🛍 **Главное меню BetMarket KZ:**", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
-        await call.answer("Товар успешно выдан клиенту!")
+        await call.answer("Прогноз в виде картинки выдан клиенту!")
     except Exception as e:
         await call.answer(f"Ошибка выдачи: {e}", show_alert=True)
 
@@ -345,18 +440,30 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success_payment(message: Message):
-    await message.answer("✅ **Оплата Stars прошла успешно!** Высылаем ваш материал...", parse_mode="Markdown")
+    await message.answer("✅ **Оплата Stars прошла успешно!** Генерируем фирменную карточку...", parse_mode="Markdown")
     
     payload = message.successful_payment.invoice_payload
     item_code = payload.replace("order_", "") if "order_" in payload else "ordinary"
     item_info = APPROVED_MARKET.get(item_code, {})
-    content = item_info.get("content", "Эксклюзивный материал от BetMarket KZ.") if isinstance(item_info, dict) else "Материал доступен."
+    
+    if isinstance(item_info, dict):
+        content = item_info.get("content", "Эксклюзивный материал от BetMarket KZ.")
+        title = item_info.get("name", "ПРОГНОЗ").upper()
+    else:
+        content = str(item_info)
+        title = "ПРОГНОЗ"
 
     user = message.from_user
-    username_tag = f"@{user.username}" if user.username else f"ID: {user.id}"
-    watermark = f"\n\n---\n🔒 *Персональная лицензия: {username_tag} (ID: {user.id})*\n⚠️ Покупая или получая прогноз, вы соглашаетесь с условиями: при обнаружении факта слива или перепродажи — мгновенный бан навсегда без возврата средств."
+    username = user.username if user.username else "no_username"
     
-    await message.answer(f"👑 **ВАШ ПРОГНОЗ:**\n\n{content}{watermark}", parse_mode="Markdown")
+    img_bio = generate_prediction_card(f"👑 {title}", content, user.id, username)
+    input_file = BufferedInputFile(img_bio.getvalue(), filename="paid_prediction.png")
+    
+    await message.answer_photo(
+        photo=input_file,
+        caption="👑 **Ваш оплаченный прогноз с водяными знаками:**",
+        parse_mode="Markdown"
+    )
     await message.answer("🛍 **Главное меню BetMarket KZ:**", reply_markup=get_dynamic_keyboard(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "profile")
@@ -379,7 +486,7 @@ async def stats_handler(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=back_kb, parse_mode="Markdown")
 
 
-# --- АДМИН-ПАНЕЛЬ И КНОПКИ УПРАВЛЕНИЯ ---
+# --- АДМИН-ПАНЕЛЬ И УПРАВЛЕНИЕ МАРКЕТОМ ---
 
 def parse_and_store_text(text_block: str):
     """Парсит текст черновика и автоматически раскладывает его по полочкам рынка"""
@@ -454,7 +561,7 @@ async def approve_draft_callback(call: CallbackQuery):
     parse_and_store_text(text_to_parse)
     
     await call.message.edit_text(
-        f"✅ **Черновик успешно одобрен и запущен в продажи!**\n\nВитрина бота обновлена.",
+        f"✅ **Черновик успешно одобрен и запущен в продажи!**\n\nВсе прогнозы теперь высылаются пользователям в виде графических карточек с их персональными водяными знаками.",
         reply_markup=None,
         parse_mode="Markdown"
     )
@@ -481,7 +588,7 @@ async def refresh_draft_callback(call: CallbackQuery):
 
 @router.message(Command("setmarket"))
 async def admin_set_market(message: Message):
-    """Ручное утверждение через текст, если хотите внести правки"""
+    """Ручное утверждение через текст"""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
         
@@ -494,7 +601,7 @@ async def admin_set_market(message: Message):
     current_date = datetime.now(timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
     
     await message.answer(
-        f"✅ **Рынок на {current_date} успешно обновлен вручную!**\nВитрина для клиентов перестроена.",
+        f"✅ **Рынок на {current_date} успешно обновлен вручную!**\nВитрина перестроена, выдача переведена на графические карточки.",
         parse_mode="Markdown",
         reply_markup=get_dynamic_keyboard()
     )
@@ -560,10 +667,17 @@ async def web_server():
 
 async def main():
     try:
+        # Устанавливаем админские команды ТОЛЬКО для чата администратора
+        admin_scope = BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
         await bot.set_my_commands([
             BotCommand(command="start", description="🏠 Главное меню"),
             BotCommand(command="draft", description="📋 Запросить свежий черновик у ИИ"),
             BotCommand(command="setmarket", description="🛠 Утвердить маркет вручную текстом")
+        ], scope=admin_scope)
+        
+        # Для остальных пользователей оставляем только базовую команду start
+        await bot.set_my_commands([
+            BotCommand(command="start", description="🏠 Главное меню")
         ])
     except Exception as e:
         logging.error(f"Не удалось установить команды: {e}")
@@ -577,7 +691,7 @@ async def main():
         
     web_server_task = asyncio.create_task(web_server())
     asyncio.create_task(background_admin_notifications())
-    logging.info("🚀 Улучшенный бот с кнопками управления успешно запущен!")
+    logging.info("🚀 Полный бот с защитой водяными знаками и разделением меню запущен!")
     
     while True:
         try:
