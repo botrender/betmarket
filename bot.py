@@ -35,7 +35,7 @@ ADMIN_CHAT_ID = 1102082462
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Используем стабильную версию модели во избежание сбоев
-MODEL_NAME = 'gemini-1.5-flash'
+MODEL_NAME = 'gemini-2.0-flash'
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
