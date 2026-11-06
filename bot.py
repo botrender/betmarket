@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (С ПРЕ-МОДЕРАЦИЕЙ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (С ШРИФТАМИ И ПРЕ-МОДЕРАЦИЕЙ) ===
 import asyncio
 import logging
 import sys
@@ -209,16 +209,29 @@ async def build_full_daily_report() -> str:
     prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
-# --- 4. Генератор защищенных карточек (с водяными знаками) ---
+# --- 4. Генератор защищенных карточек (с водяными знаками и поддержкой шрифтов) ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1100
     img = Image.new('RGB', (width, height), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
     
-    font_title = ImageFont.load_default()
-    font_text = ImageFont.load_default()
-    font_watermark = ImageFont.load_default()
-    font_small = ImageFont.load_default()
+    # Безопасная загрузка шрифтов с кириллицей
+    try:
+        font_title = ImageFont.truetype("DejaVuSans.ttf", 30)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 20)
+        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 20)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
+    except IOError:
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 30)
+            font_text = ImageFont.truetype("arial.ttf", 20)
+            font_watermark = ImageFont.truetype("arial.ttf", 20)
+            font_small = ImageFont.truetype("arial.ttf", 16)
+        except IOError:
+            font_title = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+            font_watermark = ImageFont.load_default()
+            font_small = ImageFont.load_default()
 
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
@@ -236,10 +249,10 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
     draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
     
-    offset = 165
+    offset = 175
     for paragraph in text_content.split('\n'):
         draw.text((50, offset), paragraph[:70], fill=(241, 245, 249), font=font_text)
-        offset += 28
+        offset += 30
 
     draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id})"
