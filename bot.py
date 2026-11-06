@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНЫЙ С ИСПРАВЛЕННЫМ ПАРСЕРОМ И КАРТОЧКАМИ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНЫЙ С ПОЛНОЙ ПАНЕЛЬЮ ВЫДАЧИ) ===
 import asyncio
 import logging
 import sys
@@ -60,7 +60,7 @@ APPROVED_MARKET = {
     "ordinary": None,
     "express": None,
     "high_odds": None,
-    "vip_7": {"name": "👑 VIP-Подписка (Все прогнозы на 7 дней)", "price_kz": 5000, "stars": 160, "active": True}
+    "vip_7": {"name": "👑 VIP-Подписка (Все прогнозы на 7 дней)", "price_kz": 5000, "stars": 160, "active": True, "content": "👑 VIP-Доступ ко всем прогнозам и экспрессам на 7 дней."}
 }
 
 # Буфер для модерации черновиков
@@ -320,7 +320,7 @@ async def parse_and_store_market(text_block: str):
             current_section = "high"
             continue
         elif "аналитическое обоснование" in l_lower or "аналитика" in l_lower or "---" in l_lower:
-            current_section = None # Прекращаем сбор, началась аналитика
+            current_section = None
             
         if current_section and line.strip():
             clean_line = line.replace("*", "").replace("—", "-").strip()
@@ -336,7 +336,7 @@ async def parse_and_store_market(text_block: str):
     if buf["high"]:
         APPROVED_MARKET["high_odds"] = {"name": "💣 Хай-Кэф", "price_kz": 4000, "stars": 130, "content": "\n".join(buf["high"])}
 
-# --- 6. Автономные фоновые задачи (с отправкой черновика админу) ---
+# --- 6. Автономные фоновые задачи ---
 async def auto_send_daily_bets(bot: Bot):
     logging.info("⏰ Запуск автоматической генерации черновика линии (16:30)...")
     try:
@@ -457,10 +457,19 @@ async def handle_receipt(message: Message):
         return
     user = message.from_user
     caption = f"🔔 **Новый чек!**\n👤 {user.first_name} (@{user.username})\n🆔 `{user.id}`"
+    
+    # Полная панель выдачи для всех видов товаров
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎯 Выдать Ординар", callback_data=f"grant_ordinary_{user.id}")],
-        [InlineKeyboardButton(text="🔥 Выдать Экспресс", callback_data=f"grant_express_{user.id}")]
+        [
+            InlineKeyboardButton(text="🎯 Ординар", callback_data=f"grant_ordinary_{user.id}"),
+            InlineKeyboardButton(text="🔥 Экспресс", callback_data=f"grant_express_{user.id}")
+        ],
+        [
+            InlineKeyboardButton(text="💣 Хай-Кэф", callback_data=f"grant_high_odds_{user.id}"),
+            InlineKeyboardButton(text="👑 VIP-7", callback_data=f"grant_vip_7_{user.id}")
+        ]
     ])
+    
     await message.bot.send_photo(chat_id=MY_CHAT_ID, photo=message.photo[-1].file_id, caption=caption, reply_markup=admin_kb)
     await message.answer("✅ Чек передан администратору!")
 
@@ -469,8 +478,17 @@ async def grant_product(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
     parts = call.data.split("_")
-    product_code = parts[1]
-    target_user_id = int(parts[-1])
+    # Обработка составных ключей (например, high_odds или vip_7)
+    if "high" in call.data:
+        product_code = "high_odds"
+        target_user_id = int(parts[-1])
+    elif "vip" in call.data:
+        product_code = "vip_7"
+        target_user_id = int(parts[-1])
+    else:
+        product_code = parts[1]
+        target_user_id = int(parts[-1])
+        
     item_info = APPROVED_MARKET.get(product_code, {})
     content = item_info.get("content", "Доступно.")
     
