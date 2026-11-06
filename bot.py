@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 
 # --- КРЕДЕНШИАЛЫ И КОНФИГУРАЦИЯ ---
-BOT_TOKEN = "9229154481:AAEQDxNsKv7mN6mH3wwMLOHuxV90h5fsjNs"
+BOT_TOKEN = "9229154481:AAH7WAFdvY0dTu6FL8gYVhFAJzluYN0mZxE"
 
 # Безопасное разделение ключа Gemini по частям, чтобы обойти сканер GitHub
 _p1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
