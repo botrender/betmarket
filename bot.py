@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (С ПРЕ-МОДЕРАЦИЕЙ) ===
 import asyncio
 import logging
 import sys
@@ -63,7 +63,8 @@ APPROVED_MARKET = {
     "vip_7": {"name": "👑 VIP-Подписка (Все прогнозы на 7 дней)", "price_kz": 5000, "stars": 160, "active": True}
 }
 
-LAST_GENERATED_DRAFT = {"text": ""}
+# Буфер для модерации черновиков
+PENDING_DRAFT = {"text": ""}
 
 # --- Работа с локальной историей (для статистики и аудита) ---
 def load_history():
@@ -183,12 +184,13 @@ async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
 
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
-Твоя задача — отобрать из предложенного списка реальных матчей самые надежные исходы (Победа в матче, Фора, Тотал).
-Строгий формат:
-Бесплатный прогноз: [Матч] — [Ставка] (Кэф ~1.75)
-Ординар: [Матч] — [Ставка] (Кэф ~1.85)
-Экспресс: [Матч 1] + [Матч 2] (Общий кэф ~2.40)
-Хай-кэф: [Матч] — [Ставка] (Кэф ~4.10)
+Твоя задача — отобрать из предложенного списка реальных матчей на СЕГОДНЯ самые надежные исходы.
+ВАЖНО: Никогда не выдумывай коэффициенты! Указывай реальные рыночные котировки. Если точный коэффициент неизвестен, пиши исход без примерного кэфа.
+Формат ответа:
+Бесплатный прогноз: [Матч] — [Ставка]
+Ординар: [Матч] — [Ставка]
+Экспресс: [Матч 1] + [Матч 2]
+Хай-кэф: [Матч] — [Ставка]
 Никакой лишней воды, только четкие аналитические выкладки.
 """
 
@@ -289,21 +291,26 @@ async def parse_and_store_market(text_block: str):
     if buf["high"]:
         APPROVED_MARKET["high_odds"] = {"name": "💣 Хай-Кэф", "price_kz": 4000, "stars": 130, "content": "\n".join(buf["high"])}
 
-# --- 6. Автономные фоновые задачи ---
+# --- 6. Автономные фоновые задачи (с отправкой черновика админу) ---
 async def auto_send_daily_bets(bot: Bot):
-    logging.info("⏰ Запуск автоматического формирования линии по расписанию (16:30)...")
+    logging.info("⏰ Запуск автоматической генерации черновика линии (16:30)...")
     try:
         report = await build_full_daily_report()
-        await parse_and_store_market(report)
+        PENDING_DRAFT["text"] = report
         
-        today_str = datetime.now(zoneinfo.ZoneInfo("Asia/Almaty")).strftime("%Y-%m-%d")
-        history = load_history()
-        history[today_str] = {"prediction_text": report, "status": "pending"}
-        save_history(history)
-
-        await bot.send_message(chat_id=MY_CHAT_ID, text=f"🚀 **Авто-маркет успешно сформирован!**\n\n{report}", parse_mode="Markdown")
+        moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+            [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
+        ])
+        
+        await bot.send_message(
+            chat_id=MY_CHAT_ID, 
+            text=f"📋 **Сгенерирован новый черновик линии на сегодня!**\nПроверьте перед публикацией:\n\n{report}", 
+            reply_markup=moderation_kb, 
+            parse_mode="Markdown"
+        )
     except Exception as e:
-        logging.error(f"❌ Ошибка авто-рассылки: {e}")
+        logging.error(f"❌ Ошибка генерации черновика: {e}")
 
 async def audit_yesterday_predictions(bot: Bot):
     tz = zoneinfo.ZoneInfo("Asia/Almaty")
@@ -431,14 +438,73 @@ async def grant_product(call: CallbackQuery):
     except Exception as e:
         await call.answer(f"Ошибка: {e}", show_alert=True)
 
+# --- Админ-модерация черновиков ---
 @router.message(Command("schedule"))
 async def admin_schedule(message: Message):
     if message.from_user.id != MY_CHAT_ID:
         return
     status_msg = await message.answer("⏳ Генерация расписания и линии через ESPN API...")
     report = await build_full_daily_report()
-    await parse_and_store_market(report)
-    await status_msg.edit_text(f"✅ **Линия сформирована и загружена в витрину!**\n\n{report}", parse_mode="Markdown")
+    PENDING_DRAFT["text"] = report
+    
+    moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+        [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
+    ])
+    
+    await status_msg.edit_text(
+        f"📋 **Черновик сформирован!** Проверьте текст:\n\n{report}", 
+        reply_markup=moderation_kb, 
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "admin_approve_market")
+async def admin_approve_market(call: CallbackQuery):
+    if call.from_user.id != MY_CHAT_ID:
+        await call.answer("⛔️ У вас нет прав администратора.", show_alert=True)
+        return
+        
+    draft_text = PENDING_DRAFT.get("text")
+    if not draft_text:
+        await call.answer("❌ Нет активного черновика для публикации.", show_alert=True)
+        return
+        
+    await parse_and_store_market(draft_text)
+    
+    today_str = datetime.now(zoneinfo.ZoneInfo("Asia/Almaty")).strftime("%Y-%m-%d")
+    history = load_history()
+    history[today_str] = {"prediction_text": draft_text, "status": "pending"}
+    save_history(history)
+    
+    await call.message.edit_text(
+        f"✅ **Линия успешно одобрена и опубликована на витрину!**\n\n{draft_text}", 
+        parse_mode="Markdown"
+    )
+    await call.answer("Опубликовано!")
+
+@router.callback_query(F.data == "admin_retry_market")
+async def admin_retry_market(call: CallbackQuery):
+    if call.from_user.id != MY_CHAT_ID:
+        await call.answer("⛔️ У вас нет прав администратора.", show_alert=True)
+        return
+        
+    status_msg = await call.message.edit_text("⏳ Перегенерация прогнозов через ИИ...")
+    try:
+        report = await build_full_daily_report()
+        PENDING_DRAFT["text"] = report
+        
+        moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+            [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
+        ])
+        
+        await status_msg.edit_text(
+            f"📋 **Новый вариант черновика:**\n\n{report}", 
+            reply_markup=moderation_kb, 
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка перегенерации: {e}")
 
 async def main():
     asyncio.create_task(start_dummy_server())
