@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (С ШРИФТАМИ И ПРЕ-МОДЕРАЦИЕЙ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНЫЙ С ИСПРАВЛЕННЫМ ПАРСЕРОМ И КАРТОЧКАМИ) ===
 import asyncio
 import logging
 import sys
@@ -185,13 +185,27 @@ async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
 Твоя задача — отобрать из предложенного списка реальных матчей на СЕГОДНЯ самые надежные исходы.
-ВАЖНО: Никогда не выдумывай коэффициенты! Указывай реальные рыночные котировки. Если точный коэффициент неизвестен, пиши исход без примерного кэфа.
-Формат ответа:
-Бесплатный прогноз: [Матч] — [Ставка]
-Ординар: [Матч] — [Ставка]
-Экспресс: [Матч 1] + [Матч 2]
-Хай-кэф: [Матч] — [Ставка]
-Никакой лишней воды, только четкие аналитические выкладки.
+ВАЖНО: Никогда не выдумывай коэффициенты! Указывай реальные рыночные котировки.
+Строгий формат ответа:
+Бесплатный прогноз: 
+[Матч] — [Ставка]
+
+Ординар: 
+[Матч] — [Ставка]
+
+Экспресс: 
+[Матч 1] + [Матч 2]
+
+Хай-кэф: 
+[Матч] — [Ставка]
+
+---
+Аналитическое обоснование:
+1. [Описание]
+2. [Описание]
+3. [Описание]
+4. [Описание]
+Никакой лишней воды, строго соблюдай разделение на прогнозы и аналитику в конце.
 """
 
 async def build_full_daily_report() -> str:
@@ -209,21 +223,20 @@ async def build_full_daily_report() -> str:
     prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
-# --- 4. Генератор защищенных карточек (с водяными знаками и поддержкой шрифтов) ---
+# --- 4. Генератор защищенных карточек (с умным переносом строк и кириллицей) ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1100
     img = Image.new('RGB', (width, height), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
     
-    # Безопасная загрузка шрифтов с кириллицей
     try:
-        font_title = ImageFont.truetype("DejaVuSans.ttf", 30)
+        font_title = ImageFont.truetype("DejaVuSans.ttf", 28)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 20)
         font_watermark = ImageFont.truetype("DejaVuSans.ttf", 20)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
     except IOError:
         try:
-            font_title = ImageFont.truetype("arial.ttf", 30)
+            font_title = ImageFont.truetype("arial.ttf", 28)
             font_text = ImageFont.truetype("arial.ttf", 20)
             font_watermark = ImageFont.truetype("arial.ttf", 20)
             font_small = ImageFont.truetype("arial.ttf", 16)
@@ -233,6 +246,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_watermark = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
+    # Водяные знаки на фоне
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     line_toggle = 0
@@ -245,15 +259,30 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
+    # Шапка карточки
     draw.rectangle([(30, 30), (width - 30, 90)], fill=(30, 58, 138))
     draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
     draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
     
+    # Умный перенос текста по ширине карточки
     offset = 175
+    max_line_length = 50
+    
     for paragraph in text_content.split('\n'):
-        draw.text((50, offset), paragraph[:70], fill=(241, 245, 249), font=font_text)
-        offset += 30
+        words = paragraph.split(' ')
+        current_line = ""
+        for word in words:
+            if len(current_line + " " + word) <= max_line_length:
+                current_line += (" " + word) if current_line else word
+            else:
+                draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
+                offset += 30
+                current_line = word
+        if current_line:
+            draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
+            offset += 35
 
+    # Подвал карточки с лицензией
     draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id})"
     draw.text((40, height - 72), warning_text, fill=(255, 255, 255), font=font_small)
@@ -264,7 +293,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     bio.seek(0)
     return bio
 
-# --- 5. Парсер и занесение на витрину ---
+# --- 5. Парсер и занесение на витрину (с защитой от захвата аналитики) ---
 async def parse_and_store_market(text_block: str):
     current_date = get_today_date_str()
     APPROVED_MARKET["date"] = current_date
@@ -273,27 +302,30 @@ async def parse_and_store_market(text_block: str):
     APPROVED_MARKET["express"] = None
     APPROVED_MARKET["high_odds"] = None
     
-    lines = text_block.split("\n")
-    mode = None
+    current_section = None
     buf = {"free": [], "ordinary": [], "express": [], "high": []}
     
-    for line in lines:
+    for line in text_block.split("\n"):
         l_lower = line.lower()
-        if "бесплатный" in l_lower:
-            mode = "free"
-            buf["free"].append(line)
+        if "бесплатный прогноз" in l_lower:
+            current_section = "free"
+            continue
         elif "ординар" in l_lower:
-            mode = "ordinary"
-            buf["ordinary"].append(line)
+            current_section = "ordinary"
+            continue
         elif "экспресс" in l_lower:
-            mode = "express"
-            buf["express"].append(line)
-        elif "хай" in l_lower or "хай-кэф" in l_lower:
-            mode = "high"
-            buf["high"].append(line)
-        else:
-            if mode and line.strip():
-                buf[mode].append(line.strip())
+            current_section = "express"
+            continue
+        elif "хай-кэф" in l_lower or "хай кэф" in l_lower:
+            current_section = "high"
+            continue
+        elif "аналитическое обоснование" in l_lower or "аналитика" in l_lower or "---" in l_lower:
+            current_section = None # Прекращаем сбор, началась аналитика
+            
+        if current_section and line.strip():
+            clean_line = line.replace("*", "").replace("—", "-").strip()
+            if clean_line:
+                buf[current_section].append(clean_line)
                 
     if buf["free"]:
         APPROVED_MARKET["free"] = "\n".join(buf["free"])
