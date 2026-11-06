@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНЫЙ С ПОЛНОЙ ПАНЕЛЬЮ ВЫДАЧИ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНЫЙ С УМНЫМ ТРЕКИНГОМ ЗАКАЗОВ И ССЫЛКАМИ) ===
 import asyncio
 import logging
 import sys
@@ -63,10 +63,11 @@ APPROVED_MARKET = {
     "vip_7": {"name": "👑 VIP-Подписка (Все прогнозы на 7 дней)", "price_kz": 5000, "stars": 160, "active": True, "content": "👑 VIP-Доступ ко всем прогнозам и экспрессам на 7 дней."}
 }
 
-# Буфер для модерации черновиков
+# Буферы для модерации и отслеживания покупок пользователей
 PENDING_DRAFT = {"text": ""}
+USER_PENDING_PURCHASE = {} # Словарь: {user_id: "название товара"}
 
-# --- Работа с локальной историей (для статистики и аудита) ---
+# --- Работа с локальной историей ---
 def load_history():
     if os.path.exists(HISTORY_FILE):
         try:
@@ -223,7 +224,7 @@ async def build_full_daily_report() -> str:
     prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
-# --- 4. Генератор защищенных карточек (с умным переносом строк и кириллицей) ---
+# --- 4. Генератор защищенных карточек ---
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1100
     img = Image.new('RGB', (width, height), color=(15, 23, 42))
@@ -246,7 +247,6 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_watermark = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-    # Водяные знаки на фоне
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     line_toggle = 0
@@ -259,12 +259,10 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
-    # Шапка карточки
     draw.rectangle([(30, 30), (width - 30, 90)], fill=(30, 58, 138))
     draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
     draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
     
-    # Умный перенос текста по ширине карточки
     offset = 175
     max_line_length = 50
     
@@ -282,7 +280,6 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 35
 
-    # Подвал карточки с лицензией
     draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id})"
     draw.text((40, height - 72), warning_text, fill=(255, 255, 255), font=font_small)
@@ -293,7 +290,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     bio.seek(0)
     return bio
 
-# --- 5. Парсер и занесение на витрину (с защитой от захвата аналитики) ---
+# --- 5. Парсер и занесение на витрину (исправленный от захвата аналитики) ---
 async def parse_and_store_market(text_block: str):
     current_date = get_today_date_str()
     APPROVED_MARKET["date"] = current_date
@@ -307,22 +304,34 @@ async def parse_and_store_market(text_block: str):
     
     for line in text_block.split("\n"):
         l_lower = line.lower()
-        if "бесплатный прогноз" in l_lower:
-            current_section = "free"
-            continue
-        elif "ординар" in l_lower:
-            current_section = "ordinary"
-            continue
-        elif "экспресс" in l_lower:
-            current_section = "express"
-            continue
-        elif "хай-кэф" in l_lower or "хай кэф" in l_lower:
-            current_section = "high"
-            continue
-        elif "аналитическое обоснование" in l_lower or "аналитика" in l_lower or "---" in l_lower:
+        if "аналитическое обоснование" in l_lower or "аналитика" in l_lower or "---" in l_lower:
             current_section = None
+            continue
+            
+        if "бесплатный прогноз:" in l_lower:
+            current_section = "free"
+            clean_val = line.split(":", 1)[1].strip()
+            if clean_val: buf["free"].append(clean_val)
+            continue
+        elif "ординар:" in l_lower:
+            current_section = "ordinary"
+            clean_val = line.split(":", 1)[1].strip()
+            if clean_val: buf["ordinary"].append(clean_val)
+            continue
+        elif "экспресс:" in l_lower:
+            current_section = "express"
+            clean_val = line.split(":", 1)[1].strip()
+            if clean_val: buf["express"].append(clean_val)
+            continue
+        elif "хай-кэф:" in l_lower or "хай кэф:" in l_lower:
+            current_section = "high"
+            clean_val = line.split(":", 1)[1].strip()
+            if clean_val: buf["high"].append(clean_val)
+            continue
             
         if current_section and line.strip():
+            if line.strip()[0].isdigit() and "." in line[:3]:
+                continue
             clean_line = line.replace("*", "").replace("—", "-").strip()
             if clean_line:
                 buf[current_section].append(clean_line)
@@ -432,6 +441,10 @@ async def select_item(call: CallbackQuery):
     if not item_info:
         await call.answer("❌ Позиция недоступна", show_alert=True)
         return
+    
+    # Сохраняем выбор пользователя, чтобы точно знать, что он хочет купить
+    USER_PENDING_PURCHASE[call.from_user.id] = item_info.get("name", "Прогноз")
+
     price_kz = item_info.get("price_kz", 1500)
     stars = item_info.get("stars", 50)
     text = f"📦 **{item_info['name']}**\n💳 К оплате: {price_kz} ₸ или {stars} Telegram Stars ⭐"
@@ -446,19 +459,39 @@ async def select_item(call: CallbackQuery):
 async def pay_kaspi(call: CallbackQuery):
     item_code = call.data.replace("pay_kaspi_", "")
     item_info = APPROVED_MARKET.get(item_code, {})
+    
+    # Также фиксируем выбор при переходе на оплату Kaspi
+    USER_PENDING_PURCHASE[call.from_user.id] = item_info.get("name", "Прогноз")
+
     await call.message.edit_text(
         f"💳 **Оплата через Kaspi**\nРеквизиты: `{KASPI_CARD}`\nСумма: {item_info.get('price_kz', 1500)} ₸\n\n📸 Отправьте скриншот чека в чат.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")]]), parse_mode="Markdown"
     )
 
+# --- Обработка чека с указанием товара и кликабельной ссылкой на клиента ---
 @router.message(F.photo)
 async def handle_receipt(message: Message):
     if message.from_user.id == MY_CHAT_ID:
         return
     user = message.from_user
-    caption = f"🔔 **Новый чек!**\n👤 {user.first_name} (@{user.username})\n🆔 `{user.id}`"
     
-    # Полная панель выдачи для всех видов товаров
+    # Узнаем, что именно пытался купить пользователь
+    desired_product = USER_PENDING_PURCHASE.get(user.id, "❓ Товар не выбран в меню (покупка напрямую)")
+    
+    # Формируем кликабельную ссылку на профиль клиента
+    if user.username:
+        user_link = f"@{user.username} (ссылка: t.me/{user.username})"
+    else:
+        user_link = f"[{user.first_name}](tg://user?id={user.id})"
+
+    caption = (
+        f"🔔 **Новый чек на оплату!**\n\n"
+        f"🛍 **Выбранный товар:** <u>{desired_product}</u>\n\n"
+        f"👤 **Клиент:** {user.first_name}\n"
+        f"🔗 **Связь с клиентом:** {user_link}\n"
+        f"🆔 **ID:** `{user.id}`"
+    )
+    
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🎯 Ординар", callback_data=f"grant_ordinary_{user.id}"),
@@ -470,15 +503,14 @@ async def handle_receipt(message: Message):
         ]
     ])
     
-    await message.bot.send_photo(chat_id=MY_CHAT_ID, photo=message.photo[-1].file_id, caption=caption, reply_markup=admin_kb)
-    await message.answer("✅ Чек передан администратору!")
+    await message.bot.send_photo(chat_id=MY_CHAT_ID, photo=message.photo[-1].file_id, caption=caption, reply_markup=admin_kb, parse_mode="Markdown")
+    await message.answer("✅ Чек успешно передан администратору!")
 
 @router.callback_query(F.data.startswith("grant_"))
 async def grant_product(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
     parts = call.data.split("_")
-    # Обработка составных ключей (например, high_odds или vip_7)
     if "high" in call.data:
         product_code = "high_odds"
         target_user_id = int(parts[-1])
@@ -497,6 +529,11 @@ async def grant_product(call: CallbackQuery):
         username = target_chat.username or "no_username"
         img_bio = generate_prediction_card(f"📦 {item_info.get('name', 'ПРОГНОЗ')}", content, target_user_id, username)
         await call.bot.send_photo(chat_id=target_user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="paid.png"), caption="🎉 Оплата подтверждена!")
+        
+        # Очищаем временный выбор после успешной выдачи
+        if target_user_id in USER_PENDING_PURCHASE:
+            del USER_PENDING_PURCHASE[target_user_id]
+            
         await call.answer("Выдано!")
     except Exception as e:
         await call.answer(f"Ошибка: {e}", show_alert=True)
