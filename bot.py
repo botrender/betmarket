@@ -1,9 +1,10 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНАЯ ВЕРСИЯ С VIP И ДЕДЛАЙНАМИ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (КУПОН БК + АВТОРСКИЙ ВОДЯНОЙ ЗНАК ATAMBAYEV) ===
 import asyncio
 import logging
 import sys
 import json
 import os
+import random
 import urllib.request
 from datetime import datetime, timedelta
 import zoneinfo
@@ -267,71 +268,75 @@ async def build_full_daily_report() -> str:
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
-    width, height = 900, 1400
-    img = Image.new('RGB', (width, height), color=(15, 23, 42))
+    """Генератор купона БК со светлым фоном и неприметной подписью Atambayev внизу"""
+    width, height = 900, 1300
+    # Светлый фон купона, как на реальных распечатках/скриншотах БК
+    img = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
     
     try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
-        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 18)
-        font_small = ImageFont.truetype("DejaVuSans.ttf", 15)
+        font_brand = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+        font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 16)
+        font_bold = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
+        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
     except IOError:
         try:
-            font_title = ImageFont.truetype("arial.ttf", 26)
-            font_text = ImageFont.truetype("arial.ttf", 18)
-            font_watermark = ImageFont.truetype("arial.ttf", 18)
-            font_small = ImageFont.truetype("arial.ttf", 15)
+            font_brand = ImageFont.truetype("arial.ttf", 28)
+            font_header = ImageFont.truetype("arial.ttf", 18)
+            font_text = ImageFont.truetype("arial.ttf", 16)
+            font_bold = ImageFont.truetype("arial.ttf", 16)
+            font_small = ImageFont.truetype("arial.ttf", 13)
+            font_watermark = ImageFont.truetype("arial.ttf", 14)
         except IOError:
-            font_title = ImageFont.load_default()
+            font_brand = ImageFont.load_default()
+            font_header = ImageFont.load_default()
             font_text = ImageFont.load_default()
-            font_watermark = ImageFont.load_default()
+            font_bold = ImageFont.load_default()
             font_small = ImageFont.load_default()
+            font_watermark = ImageFont.load_default()
 
-    txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    d_txt = ImageDraw.Draw(txt_layer)
-    line_toggle = 0
-    for y in range(40, height, 100):
-        watermark_str = f"ID: {user_id}" if line_toggle % 2 == 0 else f"@{username}"
-        for x in range(20, width, 260):
-            d_txt.text((x, y), watermark_str, fill=(100, 116, 139, 70), font=font_watermark)
-        line_toggle += 1
-                
-    img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
-    draw = ImageDraw.Draw(img)
+    # Шапка купона в стиле 1XBet
+    draw.rectangle([(30, 30), (width - 30, 95)], fill=(15, 23, 42))
+    draw.text((50, 42), "BETMARKET KZ", fill=(255, 255, 255), font=font_brand)
+    
+    coupon_num = random.randint(80000000000, 99999999999)
+    current_time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    draw.text((width - 270, 48), f"Купон № {coupon_num}", fill=(250, 204, 21), font=font_header)
 
-    draw.rectangle([(30, 30), (width - 30, 95)], fill=(30, 58, 138))
-    draw.text((50, 42), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
-    draw.text((50, 120), title, fill=(250, 204, 21), font=font_title)
-    
-    offset = 175
-    max_line_length = 55
-    
+    # Инфо-блок купона
+    draw.rectangle([(30, 110), (width - 30, 160)], fill=(241, 245, 249), outline=(203, 213, 225), width=1)
+    draw.text((45, 125), f"Дата/Время: {current_time_str}", fill=(71, 85, 105), font=font_small)
+    draw.text((width - 320, 125), f"Тип: {title}", fill=(15, 23, 42), font=font_bold)
+
+    # Блок с событиями (в виде таблицы БК)
+    y_offset = 185
     cleaned_content = text_content.replace("**", "").replace("__", "")
+    
+    lines = [l.strip() for l in cleaned_content.split('\n') if l.strip()]
+    
+    for idx, line in enumerate(lines, 1):
+        # Рамка события
+        draw.rectangle([(30, y_offset), (width - 30, y_offset + 55)], fill=(255, 255, 255), outline=(226, 232, 240), width=1)
+        
+        # Номер события и текст
+        draw.text((45, y_offset + 18), f"{idx}. {line[:65]}", fill=(15, 23, 42), font=font_text)
+        
+        y_offset += 65
+        if y_offset > height - 180:
+            break
 
-    for paragraph in cleaned_content.split('\n'):
-        if not paragraph.strip():
-            offset += 15
-            continue
-        words = paragraph.split(' ')
-        current_line = ""
-        for word in words:
-            if len(current_line + " " + word) <= max_line_length:
-                current_line += (" " + word) if current_line else word
-            else:
-                draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
-                offset += 26
-                current_line = word
-        if current_line:
-            draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
-            offset += 30
+    # Персональные данные клиента посредине/внизу купона
+    draw.rectangle([(30, height - 130), (width - 30, height - 85)], fill=(248, 250, 252), outline=(203, 213, 225), width=1)
+    client_info = f"Персональная лицензия: @{username}  |  ID: {user_id}"
+    draw.text((45, height - 116), client_info, fill=(30, 41, 59), font=font_bold)
 
-    draw.rectangle([(30, height - 70), (width - 30, height - 20)], fill=(185, 28, 28))
-    warning_text = f"Персональная лицензия: @{username} (ID: {user_id})"
-    draw.text((40, height - 55), warning_text, fill=(255, 255, 255), font=font_small)
+    # Неприметная авторская подпись Atambayev в самом низу
+    draw.text((width - 150, height - 55), "Atambayev", fill=(200, 200, 200), font=font_watermark)
 
     bio = BytesIO()
-    bio.name = 'prediction.png'
+    bio.name = 'bet_coupon.png'
     img.save(bio, 'PNG')
     bio.seek(0)
     return bio
@@ -404,17 +409,17 @@ async def send_vip_bundle_to_user(bot: Bot, user_id: int, username: str):
     vip_extra = APPROVED_MARKET["vip_7"].get("content_extra", "Эксклюзивный VIP-матч (кэф 2.0+)")
     
     vip_card_text = (
-        f"ОРДИНАР ДНЯ:\n{ord_c}\n\n"
-        f"ЭКСПРЕСС 2-3:\n{exp_c}\n\n"
-        f"ХАЙ-КЭФ ЭКСПРЕСС:\n{high_c}\n\n"
-        f"⭐ VIP-БОНУС (Кэф 2.0+):\n{vip_extra}"
+        f"Ординар: {ord_c}\n"
+        f"Экспресс: {exp_c}\n"
+        f"Хай-Кэф: {high_c}\n"
+        f"VIP-бонус: {vip_extra}"
     )
     
-    img_bio = generate_prediction_card("👑 VIP-ПАКЕТ ПРОГНОЗОВ НА СЕГОДНЯ", vip_card_text, user_id, username)
+    img_bio = generate_prediction_card("VIP Экспресс", vip_card_text, user_id, username)
     await bot.send_photo(
         chat_id=user_id, 
-        photo=BufferedInputFile(img_bio.getvalue(), filename="vip_daily.png"), 
-        caption="🎉 Ваша ежедневная VIP-подписка успешно отправлена!"
+        photo=BufferedInputFile(img_bio.getvalue(), filename="vip_coupon.png"), 
+        caption="👑 Ваши ежедневные VIP-купоны по активной подписке!"
     )
 
 async def auto_send_daily_bets(bot: Bot):
@@ -469,7 +474,6 @@ async def audit_yesterday_predictions(bot: Bot):
         logging.error(f"❌ Ошибка аудита: {e}")
 
 def is_sale_active(close_time_str: str) -> bool:
-    """Умная проверка дедлайна с поддержкой ночных матчей"""
     try:
         tz = zoneinfo.ZoneInfo("Asia/Almaty")
         now = datetime.now(tz)
@@ -528,8 +532,8 @@ async def get_free_pick(call: CallbackQuery):
         await call.answer("На сегодня бесплатный прогноз ещё не выложен.", show_alert=True)
         return
     user = call.from_user
-    img_bio = generate_prediction_card("🎁 БЕСПЛАТНЫЙ ПРОГНОЗ", free_content, user.id, user.username or "no_username")
-    await call.message.answer_photo(photo=BufferedInputFile(img_bio.getvalue(), filename="free.png"), reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")]]))
+    img_bio = generate_prediction_card("Ординар", free_content, user.id, user.username or "no_username")
+    await call.message.answer_photo(photo=BufferedInputFile(img_bio.getvalue(), filename="coupon_free.png"), reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")]]))
 
 @router.callback_query(F.data.startswith("item_"))
 async def select_item(call: CallbackQuery):
@@ -634,12 +638,13 @@ async def grant_product(call: CallbackQuery):
         if product_code == "vip_7":
             add_vip_user(target_user_id)
             await send_vip_bundle_to_user(call.bot, target_user_id, username)
-            await call.answer("👑 VIP-подписка активирована на 7 дней! Прогнозы отправлены.")
+            await call.answer("👑 VIP-подписка активирована на 7 дней! Купоны отправлены.")
         else:
             item_info = APPROVED_MARKET.get(product_code, {})
             content = item_info.get("content", "Доступно.")
-            img_bio = generate_prediction_card(f"📦 {item_info.get('name', 'ПРОГНОЗ')}", content, target_user_id, username)
-            await call.bot.send_photo(chat_id=target_user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="paid.png"), caption="🎉 Оплата подтверждена! Ваш прогноз:")
+            coupon_type_name = "Ординар" if "ordinary" in product_code else ("Экспресс" if "express" in product_code else "Хай-Кэф")
+            img_bio = generate_prediction_card(coupon_type_name, content, target_user_id, username)
+            await call.bot.send_photo(chat_id=target_user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="coupon.png"), caption="🎉 Оплата подтверждена! Ваш купон:")
             await call.answer("Успешно выдано клиенту!")
         
         if target_user_id in USER_PENDING_PURCHASE:
@@ -827,7 +832,7 @@ async def admin_approve_market(call: CallbackQuery):
                     await send_vip_bundle_to_user(call.bot, u_id, "vip_client")
                     sent_count += 1
                 except Exception as e:
-                    logging.error(f"Не удалось отправить VIP рассылку пользователю {u_id}: {e}")
+                    logging.error(f"Не удалось отправить VIP купоны пользователю {u_id}: {e}")
         except Exception:
             continue
 
@@ -836,7 +841,7 @@ async def admin_approve_market(call: CallbackQuery):
     high_t = APPROVED_MARKET["high_odds"]["close_time"]
     
     await call.message.edit_text(
-        f"✅ **Линия одобрена, опубликована и разослана!**\n"
+        f"✅ **Линия одобрена, опубликована и купоны разосланы!**\n"
         f"👑 Автоматически отправлено активным VIP-клиентам: **{sent_count} чел.**\n"
         f"⏱ Дедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{draft_text}", 
         parse_mode="Markdown"
