@@ -475,11 +475,22 @@ async def audit_yesterday_predictions(bot: Bot):
         logging.error(f"❌ Ошибка аудита: {e}")
 
 def is_sale_active(close_time_str: str) -> bool:
+    """Умная проверка дедлайна с учетом ночных матчей (после полуночи)"""
     try:
         tz = zoneinfo.ZoneInfo("Asia/Almaty")
         now = datetime.now(tz)
         h, m = map(int, close_time_str.split(":"))
+        
+        # Создаем время дедлайна на сегодня
         close_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        
+        # Если дедлайн указан глубокой ночью (например, 00:50, 01:00), 
+        # а сейчас вечер предыдущего дня, то продажи активны.
+        # Если сейчас уже ночь после дедлайна — продажи закрываются.
+        if h < 6 and now.hour >= 18:
+            # Матч ночью следующего дня, сегодня продажи еще идут
+            return True
+            
         return now < close_dt
     except Exception:
         return True
