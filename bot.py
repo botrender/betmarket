@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ИНТЕРАКТИВНОЕ УПРАВЛЕНИЕ ВРЕМЕНЕМ ПРОДАЖ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (РАЗДЕЛЬНОЕ ВРЕМЯ ПРОДАЖ ДЛЯ КАЖДОГО ТОВАРА) ===
 import asyncio
 import logging
 import sys
@@ -57,21 +57,21 @@ APPROVED_MARKET = {
         "name": "🎯 Ординар дня", 
         "price_kz": 1500, 
         "stars": 50, 
-        "close_time": "21:00", 
+        "close_time": "19:00", # Индивидуальный дедлайн для ординаров
         "content": None
     },
     "express": {
         "name": "🔥 Экспресс 2-3", 
         "price_kz": 2500, 
         "stars": 80, 
-        "close_time": "21:00", 
+        "close_time": "21:00", # Индивидуальный дедлайн для экспрессов
         "content": None
     },
     "high_odds": {
         "name": "💣 Хай-Кэф Экспресс (Кэф 4-7)", 
         "price_kz": 4000, 
         "stars": 130, 
-        "close_time": "21:00", 
+        "close_time": "22:30", # Индивидуальный дедлайн для хай-кэфов
         "content": None
     },
     "vip_7": {
@@ -85,7 +85,7 @@ APPROVED_MARKET = {
 
 PENDING_DRAFT = {"text": ""}
 USER_PENDING_PURCHASE = {}
-ADMIN_STATE = {} # Для отслеживания ввода времени администратором
+ADMIN_STATE = {} # Для отслеживания состояний админа (какой товар сейчас настраиваем)
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -377,15 +377,26 @@ async def auto_send_daily_bets(bot: Bot):
         report = await build_full_daily_report()
         PENDING_DRAFT["text"] = report
         
+        ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+        exp_t = APPROVED_MARKET["express"]["close_time"]
+        high_t = APPROVED_MARKET["high_odds"]["close_time"]
+        
         moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-            [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")],
+            [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
         ])
         
         await bot.send_message(
             chat_id=MY_CHAT_ID, 
-            text=f"📋 **Сгенерирован новый черновик линии на сегодня!**\nТекущий дедлайн продаж: **{APPROVED_MARKET['ordinary']['close_time']}**\n\nПроверьте текст перед публикацией:\n\n{report}", 
+            text=(
+                f"📋 **Сгенерирован новый черновик линии на сегодня!**\n\n"
+                f"⏳ **Текущие дедлайны продаж:**\n"
+                f"• Ординар: до **{ord_t}**\n"
+                f"• Экспресс: до **{exp_t}**\n"
+                f"• Хай-Кэф: до **{high_t}**\n\n"
+                f"Проверьте текст перед публикацией:\n\n{report}"
+            ), 
             reply_markup=moderation_kb, 
             parse_mode="Markdown"
         )
@@ -608,113 +619,155 @@ async def admin_schedule(message: Message):
     report = await build_full_daily_report()
     PENDING_DRAFT["text"] = report
     
+    ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+    exp_t = APPROVED_MARKET["express"]["close_time"]
+    high_t = APPROVED_MARKET["high_odds"]["close_time"]
+    
     moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-        [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")],
+        [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
         [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
     ])
     
     await status_msg.edit_text(
-        f"📋 **Черновик сформирован!** Дедлайн по умолчанию: **{APPROVED_MARKET['ordinary']['close_time']}**\n\n{report}", 
+        f"📋 **Черновик сформирован!**\nТекущие дедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{report}", 
         reply_markup=moderation_kb, 
         parse_mode="Markdown"
     )
 
-# --- ИНТЕРАКТИВНОЕ МЕНЮ НАСТРОЙКИ ВРЕМЕНИ ПРОДАЖ ---
-@router.callback_query(F.data == "admin_set_time_menu")
-async def admin_set_time_menu(call: CallbackQuery):
+# --- МЕНЮ НАСТРОЙКИ ВРЕМЕНИ ПО КАТЕГОРИЯМ ---
+@router.callback_query(F.data == "admin_cat_time_menu")
+async def admin_cat_time_menu(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
-    time_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="18:00", callback_data="set_time_18:00"),
-            InlineKeyboardButton(text="19:30", callback_data="set_time_19:30"),
-            InlineKeyboardButton(text="21:00", callback_data="set_time_21:00")
-        ],
-        [
-            InlineKeyboardButton(text="22:30", callback_data="set_time_22:30"),
-            InlineKeyboardButton(text="⌨️ Ввести вручную", callback_data="set_time_custom")
-        ],
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🎯 Ординар (сейчас: {APPROVED_MARKET['ordinary']['close_time']})", callback_data="set_cat_ordinary")],
+        [InlineKeyboardButton(text=f"🔥 Экспресс (сейчас: {APPROVED_MARKET['express']['close_time']})", callback_data="set_cat_express")],
+        [InlineKeyboardButton(text=f"💣 Хай-Кэф (сейчас: {APPROVED_MARKET['high_odds']['close_time']})", callback_data="set_cat_high_odds")],
         [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
     ])
     await call.message.edit_text(
-        "⏱ **Выберите время закрытия продаж для платных прогнозов** (Ординар, Экспресс, Хай-Кэф):",
-        reply_markup=time_kb
+        "⚙️ **Выберите категорию прогноза, для которой хотите изменить время окончания продаж:**",
+        reply_markup=kb
     )
 
-@router.callback_query(F.data.startswith("set_time_") & ~F.data.contains("custom"))
-async def set_preset_time(call: CallbackQuery):
+@router.callback_query(F.data.startswith("set_cat_"))
+async def select_category_to_set(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
-    new_time = call.data.replace("set_time_", "")
+    cat_code = call.data.replace("set_cat_", "")
+    ADMIN_STATE[call.from_user.id] = {"action": "setting_cat_time", "category": cat_code}
     
-    # Применяем ко всем платным позициям
-    APPROVED_MARKET["ordinary"]["close_time"] = new_time
-    APPROVED_MARKET["express"]["close_time"] = new_time
-    APPROVED_MARKET["high_odds"]["close_time"] = new_time
+    names = {"ordinary": "Ординар дня", "express": "Экспресс 2-3", "high_odds": "Хай-Кэф Экспресс"}
     
-    moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-        [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")],
-        [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
+    time_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="18:00", callback_data=f"timeval_18:00"),
+            InlineKeyboardButton(text="19:00", callback_data=f"timeval_19:00"),
+            InlineKeyboardButton(text="20:30", callback_data=f"timeval_20:30")
+        ],
+        [
+            InlineKeyboardButton(text="21:00", callback_data=f"timeval_21:00"),
+            InlineKeyboardButton(text="22:30", callback_data=f"timeval_22:30"),
+            InlineKeyboardButton(text="⌨️ Ввести вручную", callback_data="timeval_custom")
+        ],
+        [InlineKeyboardButton(text="◀️ Назад к выбору категорий", callback_data="admin_cat_time_menu")]
     ])
     
     await call.message.edit_text(
-        f"✅ Время дедлайна успешно изменено на **{new_time}**!\n\n📋 Проверьте черновик и нажмите публикацию:",
-        reply_markup=moderation_kb,
-        parse_mode="Markdown"
+        f"⏱ Выберите время дедлайна для категории: **{names.get(cat_code, cat_code)}**\nИли нажмите «Ввести вручную»:",
+        reply_markup=time_kb
     )
 
-@router.callback_query(F.data == "set_time_custom")
-async def set_time_custom(call: CallbackQuery):
+@router.callback_query(F.data.startswith("timeval_"))
+async def apply_time_value(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
-    ADMIN_STATE[call.from_user.id] = "waiting_for_time"
-    await call.message.answer(
-        "⌨️ **Введите точное время закрытия продаж в формате ЧЧ:ММ** (например: `19:45` или `20:15`):"
+    val = call.data.replace("timeval_", "")
+    state_data = ADMIN_STATE.get(call.from_user.id, {})
+    cat_code = state_data.get("category")
+    
+    if not cat_code:
+        await call.answer("Ошибка сессии, начните заново.", show_alert=True)
+        return
+        
+    if val == "custom":
+        ADMIN_STATE[call.from_user.id]["action"] = "waiting_custom_time"
+        await call.message.answer(f"⌨️ Введите точное время дедлайна для выбранной категории в формате `ЧЧ:ММ` (например, `19:15`):")
+        await call.answer()
+        return
+        
+    # Сохраняем время для конкретной категории
+    APPROVED_MARKET[cat_code]["close_time"] = val
+    ADMIN_STATE[call.from_user.id] = None
+    
+    await show_category_menu_after_change(call.message)
+
+async def show_category_menu_after_change(message: Message):
+    ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+    exp_t = APPROVED_MARKET["express"]["close_time"]
+    high_t = APPROVED_MARKET["high_odds"]["close_time"]
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🎯 Ординар (сейчас: {ord_t})", callback_data="set_cat_ordinary")],
+        [InlineKeyboardButton(text=f"🔥 Экспресс (сейчас: {exp_t})", callback_data="set_cat_express")],
+        [InlineKeyboardButton(text=f"💣 Хай-Кэф (сейчас: {high_t})", callback_data="set_cat_high_odds")],
+        [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
+    ])
+    await message.edit_text(
+        "✅ Время успешно обновлено!\n\n⚙️ Можете настроить другую категорию или вернуться к публикации:",
+        reply_markup=kb
     )
-    await call.answer()
 
 @router.callback_query(F.data == "admin_back_to_publish")
 async def admin_back_to_publish(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
         return
     draft_text = PENDING_DRAFT.get("text", "Нет текста")
+    ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+    exp_t = APPROVED_MARKET["express"]["close_time"]
+    high_t = APPROVED_MARKET["high_odds"]["close_time"]
+    
     moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-        [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")],
+        [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
         [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
     ])
     await call.message.edit_text(
-        f"📋 **Черновик линии:** (Дедлайн: {APPROVED_MARKET['ordinary']['close_time']})\n\n{draft_text}",
+        f"📋 **Черновик линии:**\nДедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{draft_text}",
         reply_markup=moderation_kb,
         parse_mode="Markdown"
     )
 
-# Перехват текстового ввода времени от администратора
+# Перехват ручного текстового ввода времени администратором
 @router.message(F.text & (F.from_user.id == MY_CHAT_ID))
 async def admin_text_input(message: Message):
-    if ADMIN_STATE.get(message.from_user.id) == "waiting_for_time":
+    state = ADMIN_STATE.get(message.from_user.id, {})
+    if isinstance(state, dict) and state.get("action") == "waiting_custom_time":
+        cat_code = state.get("category")
         text_time = message.text.strip()
-        # Простая проверка формата ЧЧ:ММ
+        
         if ":" in text_time and len(text_time) <= 5:
-            APPROVED_MARKET["ordinary"]["close_time"] = text_time
-            APPROVED_MARKET["express"]["close_time"] = text_time
-            APPROVED_MARKET["high_odds"]["close_time"] = text_time
-            
+            APPROVED_MARKET[cat_code]["close_time"] = text_time
             ADMIN_STATE[message.from_user.id] = None
             
-            moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-                [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")]
+            ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+            exp_t = APPROVED_MARKET["express"]["close_time"]
+            high_t = APPROVED_MARKET["high_odds"]["close_time"]
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"🎯 Ординар (сейчас: {ord_t})", callback_data="set_cat_ordinary")],
+                [InlineKeyboardButton(text=f"🔥 Экспресс (сейчас: {exp_t})", callback_data="set_cat_express")],
+                [InlineKeyboardButton(text=f"💣 Хай-Кэф (сейчас: {high_t})", callback_data="set_cat_high_odds")],
+                [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
             ])
             await message.answer(
-                f"✅ Установлено новое время дедлайна: **{text_time}**!\nТеперь нажмите кнопку публикации:",
-                reply_markup=moderation_kb,
+                f"✅ Время для категории успешно установлено на **{text_time}**!",
+                reply_markup=kb,
                 parse_mode="Markdown"
             )
         else:
-            await message.answer("❌ Неверный формат. Введите время в формате `ЧЧ:ММ` (например, `20:30`):")
+            await message.answer("❌ Неверный формат. Введите время в формате `ЧЧ:ММ` (например, `21:30`):")
 
 @router.callback_query(F.data == "admin_approve_market")
 async def admin_approve_market(call: CallbackQuery):
@@ -734,8 +787,16 @@ async def admin_approve_market(call: CallbackQuery):
     history[today_str] = {"prediction_text": draft_text, "status": "pending"}
     save_history(history)
     
+    ord_t = APPROVED_MARKET["ordinary"]["close_time"]
+    exp_t = APPROVED_MARKET["express"]["close_time"]
+    high_t = APPROVED_MARKET["high_odds"]["close_time"]
+    
     await call.message.edit_text(
-        f"✅ **Линия успешно одобрена и опубликована на витрину!**\n⏱ Дедлайн продаж: до {APPROVED_MARKET['ordinary']['close_time']}\n\n{draft_text}", 
+        f"✅ **Линия успешно одобрена и опубликована на витрину!**\n"
+        f"⏱ Дедлайны продаж:\n"
+        f"• Ординар: до {ord_t}\n"
+        f"• Экспресс: до {exp_t}\n"
+        f"• Хай-Кэф: до {high_t}\n\n{draft_text}", 
         parse_mode="Markdown"
     )
     await call.answer("Опубликовано!")
@@ -753,7 +814,7 @@ async def admin_retry_market(call: CallbackQuery):
         
         moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
-            [InlineKeyboardButton(text="⚙️ Изменить время продаж", callback_data="admin_set_time_menu")],
+            [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
         ])
         
