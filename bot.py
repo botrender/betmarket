@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (GEMINI + РЕЗЕРВНЫЙ GROQ С ЗАЩИТОЙ КЛЮЧЕЙ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ПЕЧАТЬ №1, ЯРКАЯ ЗАЩИТА, СМЕЩЕННЫЙ VIP, GEMINI + GROQ) ===
 import asyncio
 import logging
 import sys
@@ -6,6 +6,7 @@ import json
 import os
 import random
 import urllib.request
+import math
 from datetime import datetime, timedelta
 import zoneinfo
 from aiohttp import web, ClientSession
@@ -22,9 +23,6 @@ import google.generativeai as genai
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
-
-# Импортируем urllib для запросов к Groq API без внешних тяжелых зависимостей
-import urllib.parse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +50,6 @@ _groq_p1 = "gsk_WzwaGIVsVy1my871HKrwWGdyb3FYIyI1"
 _groq_p2 = "RhY4JSGYhlP8jfSxsXKldjn"
 GROQ_API_KEY = _groq_p1 + _groq_p2
 
-# Пулы ключей Gemini
 API_POOL_PART_1 = [GEMINI_KEY_1, GEMINI_KEY_2]
 API_POOL_PART_2 = [GEMINI_KEY_3]
 
@@ -228,7 +225,6 @@ async def fetch_espn_results_comprehensive(target_date):
     return completed_games
 
 def ask_groq_sync(prompt: str, system_instruction: str) -> str:
-    """Запрос к резервному ИИ Groq (Llama-3)"""
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -248,14 +244,12 @@ def ask_groq_sync(prompt: str, system_instruction: str) -> str:
         return res_data['choices'][0]['message']['content'].strip()
 
 async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
-    """Универсальная ротация: Сначала все ключи Gemini -> Затем резервный Groq"""
     all_pools = [
         ("Часть 1 (Gemini)", API_POOL_PART_1),
         ("Часть 2 (Gemini)", API_POOL_PART_2)
     ]
     
     last_error = None
-    # 1. Пробуем ключи Gemini
     for pool_name, pool_keys in all_pools:
         for api_key in pool_keys:
             genai.configure(api_key=api_key)
@@ -271,15 +265,11 @@ async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
                     await asyncio.sleep(0.3)
                     continue
 
-    # 2. Переключение на Groq, если Gemini исчерпал лимиты
-    logging.info("⚡️ Все лимиты Gemini исчерпаны! Автоматически переключаемся на резервный Groq (Llama-3)...")
+    logging.info("⚡️ Все лимиты Gemini исчерпаны! Переключаемся на резервный Groq...")
     try:
-        groq_response = await asyncio.to_thread(ask_groq_sync, prompt, system_instruction)
-        logging.info("✅ Запрос успешно выполнен через резервный Groq ИИ!")
-        return groq_response
+        return await asyncio.to_thread(ask_groq_sync, prompt, system_instruction)
     except Exception as groq_err:
-        logging.error(f"❌ Ошибка и резервного Groq API: {groq_err}")
-        raise Exception(f"❌ Все Gemini ключи и резервный Groq недоступны. Ошибка: {last_error} | Groq: {groq_err}")
+        raise Exception(f"❌ Все ИИ исчерпали лимиты. Gemini: {last_error} | Groq: {groq_err}")
 
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
@@ -327,6 +317,29 @@ async def build_full_daily_report() -> str:
     prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов, включая специальный VIP-бонус с коэффициентом от 2.0."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
+def draw_variant_1_stamp(draw: ImageDraw.ImageDraw, font_big: ImageFont.ImageFont, font_mid: ImageFont.ImageFont, font_small: ImageFont.ImageFont, cx: int, cy: int, r: int):
+    """Отрисовка выбранного логотипа-печати Вариант №1 (Syndicate Stamp)"""
+    gold = (234, 179, 8)
+    
+    # Внешний двойной контур
+    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold, width=3)
+    draw.ellipse([(cx - r + 5, cy - r + 5), (cx + r - 5, cy + r - 5)], outline=gold, width=1)
+    draw.ellipse([(cx - r + 10, cy - r + 10), (cx + r - 10, cy + r - 10)], outline=gold, width=2)
+
+    # Корона сверху
+    crown_y = cy - 35
+    crown = [(cx - 18, crown_y + 12), (cx - 24, crown_y - 6), (cx - 10, crown_y + 4), (cx, crown_y - 12), (cx + 10, crown_y + 4), (cx + 24, crown_y - 6), (cx + 18, crown_y + 12)]
+    draw.polygon(crown, fill=gold)
+
+    # Инициалы по центру «BM»
+    draw.text((cx - 22, cy - 14), "BM", fill=gold, font=font_big)
+
+    # Надпись «VERIFIED»
+    draw.text((cx - 28, cy + 16), "VERIFIED", fill=gold, font=font_mid)
+    
+    # Нижний подзаголовок
+    draw.text((cx - 36, cy + 30), "BETMARKET KZ", fill=(148, 163, 184), font=font_small)
+
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1150
     img = Image.new('RGB', (width, height), color=(10, 15, 30))
@@ -342,43 +355,66 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 17)
-        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 14)
-        font_stamp = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 20) # Крупный и четкий
+        font_stamp_lbl = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
+        
+        font_stamp_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        font_stamp_mid = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
+        font_stamp_small = ImageFont.truetype("DejaVuSans-Bold.ttf", 7)
     except IOError:
         try:
             font_header = ImageFont.truetype("arial.ttf", 22)
             font_title = ImageFont.truetype("arial.ttf", 20)
             font_text = ImageFont.truetype("arial.ttf", 17)
-            font_watermark = ImageFont.truetype("arial.ttf", 14)
-            font_stamp = ImageFont.truetype("arial.ttf", 12)
+            font_watermark = ImageFont.truetype("arial-bold.ttf", 20)
+            font_stamp_lbl = ImageFont.truetype("arial-bold.ttf", 11)
             font_small = ImageFont.truetype("arial.ttf", 13)
+            
+            font_stamp_big = ImageFont.truetype("arial-bold.ttf", 26)
+            font_stamp_mid = ImageFont.truetype("arial-bold.ttf", 10)
+            font_stamp_small = ImageFont.truetype("arial-bold.ttf", 7)
         except IOError:
             font_header = ImageFont.load_default()
             font_title = ImageFont.load_default()
             font_text = ImageFont.load_default()
             font_watermark = ImageFont.load_default()
-            font_stamp = ImageFont.load_default()
+            font_stamp_lbl = ImageFont.load_default()
             font_small = ImageFont.load_default()
+            font_stamp_big = ImageFont.load_default()
+            font_stamp_mid = ImageFont.load_default()
+            font_stamp_small = ImageFont.load_default()
 
+    # ДИАГОНАЛЬНАЯ ЯРКАЯ ЗАЩИТА: Ник и ID четко видны поперек всей карточки
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
+    watermark_str = f"🛡 ID: {user_id} | @{username} 🛡"
+    
     line_toggle = 0
-    watermark_str = f"ID: {user_id} | @{username}"
-    for y in range(40, height, 100):
-        shift = 150 if line_toggle % 2 == 0 else 0
-        for x in range(-50 + shift, width, 300):
-            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 22), font=font_watermark)
+    for y in range(80, height, 110):
+        shift = 160 if line_toggle % 2 == 0 else 0
+        for x in range(-100 + shift, width + 100, 360):
+            # Повышенная прозрачность (85/255) делает защиту отчетливо видимой
+            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 85), font=font_watermark)
         line_toggle += 1
                 
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
+    # Шапка купона
     draw.rounded_rectangle([(35, 35), (width - 35, 105)], radius=12, fill=(20, 30, 55), outline=(234, 179, 8), width=2)
     coupon_num = random.randint(800000000, 999999999)
     draw.text((55, 52), "BETMARKET KZ", fill=(255, 255, 255), font=font_header)
-    draw.text((width - 250, 56), f"Купон № {coupon_num}", fill=(234, 179, 8), font=font_header)
+    
+    # Купон № смещен влево, чтобы освободить место под VIP VERIFIED
+    draw.text((width - 450, 56), f"Купон № {coupon_num}", fill=(234, 179, 8), font=font_header)
 
+    # ИСПРАВЛЕНИЕ: Плашка VIP VERIFIED аккуратно сдвинута влево и полностью влезает в шапку
+    stamp_x, stamp_y = width - 180, 54
+    draw.rounded_rectangle([(stamp_x, stamp_y), (stamp_x + 130, stamp_y + 30)], radius=6, fill=(234, 179, 8))
+    draw.text((stamp_x + 14, stamp_y + 8), "VIP VERIFIED", fill=(15, 23, 42), font=font_stamp_lbl)
+
+    # Текстовая карточка
     draw.rounded_rectangle([(35, 130), (width - 35, height - 120)], radius=15, fill=(15, 23, 42), outline=(51, 65, 85), width=2)
     draw.text((60, 160), title, fill=(234, 179, 8), font=font_title)
     draw.line([(60, 195), (width - 60, 195)], fill=(51, 65, 85), width=1)
@@ -404,15 +440,15 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             draw.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 38
 
+    # НОВЫЙ ЭЛЕМЕНТ: Фирменный логотип-печать Вариант №1 (Syndicate Stamp) в правом нижнем углу карточки
+    draw_variant_1_stamp(draw, font_stamp_big, font_stamp_mid, font_stamp_small, cx=width - 130, cy=height - 210, r=55)
+
+    # Нижнее предупреждение
     draw.rounded_rectangle([(35, height - 100), (width - 35, height - 35)], radius=10, fill=(127, 29, 29), outline=(239, 68, 68), width=1)
     warning_text = "⚠️ ВНИМАНИЕ: Перепродажа и слив караются вечным баном!"
     license_text = f"Персональная лицензия выдана: @{username} (ID: {user_id})"
     draw.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
     draw.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
-
-    stamp_x, stamp_y = width - 130, 48
-    draw.rounded_rectangle([(stamp_x, stamp_y), (stamp_x + 75, stamp_y + 26)], radius=6, fill=(234, 179, 8))
-    draw.text((stamp_x + 8, stamp_y + 6), "VIP VERIFIED", fill=(15, 23, 42), font=font_stamp)
 
     bio = BytesIO()
     bio.name = 'coupon_premium.png'
@@ -967,7 +1003,7 @@ async def main():
     scheduler.start()
 
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("🚀 Бот BetMarket KZ успешно запущен на Render (Gemini + Groq Cascade)!")
+    logging.info("🚀 Бот BetMarket KZ успешно запущен на Render!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
