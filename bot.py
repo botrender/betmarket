@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (РАЗДЕЛЬНОЕ ВРЕМЯ ПРОДАЖ ДЛЯ КАЖДОГО ТОВАРА) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (VIP-АВТОМАТИЗАЦИЯ НА 7 ДНЕЙ) ===
 import asyncio
 import logging
 import sys
@@ -39,6 +39,7 @@ ADMIN_USERNAME = "BulatAtambayev"
 KASPI_CARD = "4400 4302 7720 4696"
 
 HISTORY_FILE = "history.json"
+VIP_USERS_FILE = "vip_users.json"
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -57,21 +58,21 @@ APPROVED_MARKET = {
         "name": "🎯 Ординар дня", 
         "price_kz": 1500, 
         "stars": 50, 
-        "close_time": "19:00", # Индивидуальный дедлайн для ординаров
+        "close_time": "19:00", 
         "content": None
     },
     "express": {
         "name": "🔥 Экспресс 2-3", 
         "price_kz": 2500, 
         "stars": 80, 
-        "close_time": "21:00", # Индивидуальный дедлайн для экспрессов
+        "close_time": "21:00", 
         "content": None
     },
     "high_odds": {
         "name": "💣 Хай-Кэф Экспресс (Кэф 4-7)", 
         "price_kz": 4000, 
         "stars": 130, 
-        "close_time": "22:30", # Индивидуальный дедлайн для хай-кэфов
+        "close_time": "22:30", 
         "content": None
     },
     "vip_7": {
@@ -85,7 +86,7 @@ APPROVED_MARKET = {
 
 PENDING_DRAFT = {"text": ""}
 USER_PENDING_PURCHASE = {}
-ADMIN_STATE = {} # Для отслеживания состояний админа (какой товар сейчас настраиваем)
+ADMIN_STATE = {}
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -99,6 +100,41 @@ def load_history():
 def save_history(data):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_vip_users():
+    if os.path.exists(VIP_USERS_FILE):
+        try:
+            with open(VIP_USERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_vip_users(data):
+    with open(VIP_USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def add_vip_user(user_id: int):
+    vip_data = load_vip_users()
+    tz = zoneinfo.ZoneInfo("Asia/Almaty")
+    # Подписка на 7 дней от текущего момента
+    expire_dt = datetime.now(tz) + timedelta(days=7)
+    vip_data[str(user_id)] = expire_dt.isoformat()
+    save_vip_users(vip_data)
+
+def is_user_vip(user_id: int) -> bool:
+    vip_data = load_vip_users()
+    str_id = str(user_id)
+    if str_id not in vip_data:
+        return False
+    try:
+        tz = zoneinfo.ZoneInfo("Asia/Almaty")
+        expire_dt = datetime.fromisoformat(vip_data[str_id])
+        if datetime.now(tz) < expire_dt:
+            return True
+    except Exception:
+        pass
+    return False
 
 async def handle_ping(request):
     return web.Response(text="BetMarket KZ Engine is running 24/7!")
@@ -371,6 +407,22 @@ async def parse_and_store_market(text_block: str):
     if buf["vip_bonus"]:
         APPROVED_MARKET["vip_7"]["content_extra"] = "\n".join(buf["vip_bonus"])
 
+async def send_vip_bundle_to_user(bot: Bot, user_id: int, username: str):
+    ord_c = APPROVED_MARKET["ordinary"].get("content", "Нет данных")
+    exp_c = APPROVED_MARKET["express"].get("content", "Нет данных")
+    high_c = APPROVED_MARKET["high_odds"].get("content", "Нет данных")
+    vip_extra = APPROVED_MARKET["vip_7"].get("content_extra", "Эксклюзивный VIP-матч (кэф 2.0+)")
+    
+    full_vip_content = (
+        f"👑 **VIP ПАКЕТ ПРОГНОЗОВ НА СЕГОДНЯ:**\n\n"
+        f"🎯 **Ординар:**\n{ord_c}\n\n"
+        f"🔥 **Экспресс:**\n{exp_c}\n\n"
+        f"💣 **Хай-Кэф:**\n{high_c}\n\n"
+        f"⭐ **Эксклюзивный VIP-бонус (кэф 2.0+):**\n{vip_extra}"
+    )
+    img_bio = generate_prediction_card("👑 VIP-ДОСТУП КО ВСЕМ ПРОГНОЗАМ", full_vip_content, user_id, username)
+    await bot.send_photo(chat_id=user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="vip_daily.png"), caption="🎁 Ваши ежедневные VIP-прогнозы по активной подписке!")
+
 async def auto_send_daily_bets(bot: Bot):
     logging.info("⏰ Запуск автоматической генерации черновика линии (16:30)...")
     try:
@@ -382,7 +434,7 @@ async def auto_send_daily_bets(bot: Bot):
         high_t = APPROVED_MARKET["high_odds"]["close_time"]
         
         moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+            [InlineKeyboardButton(text="✅ Опубликовать и разослать VIP", callback_data="admin_approve_market")],
             [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
         ])
@@ -391,11 +443,8 @@ async def auto_send_daily_bets(bot: Bot):
             chat_id=MY_CHAT_ID, 
             text=(
                 f"📋 **Сгенерирован новый черновик линии на сегодня!**\n\n"
-                f"⏳ **Текущие дедлайны продаж:**\n"
-                f"• Ординар: до **{ord_t}**\n"
-                f"• Экспресс: до **{exp_t}**\n"
-                f"• Хай-Кэф: до **{high_t}**\n\n"
-                f"Проверьте текст перед публикацией:\n\n{report}"
+                f"⏳ **Дедлайны продаж:** Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n"
+                f"При публикации линия автоматически уйдет всем активным VIP-клиентам в ЛС.\n\nПроверьте текст:\n\n{report}"
             ), 
             reply_markup=moderation_kb, 
             parse_mode="Markdown"
@@ -557,7 +606,7 @@ async def handle_receipt(message: Message):
         ],
         [
             InlineKeyboardButton(text="💣 Хай-Кэф", callback_data=f"grant_high_odds_{user.id}"),
-            InlineKeyboardButton(text="👑 VIP-7", callback_data=f"grant_vip_7_{user.id}")
+            InlineKeyboardButton(text="👑 VIP-7 (Активировать подписку)", callback_data=f"grant_vip_7_{user.id}")
         ]
     ])
     
@@ -584,30 +633,22 @@ async def grant_product(call: CallbackQuery):
         username = target_chat.username or "no_username"
         
         if product_code == "vip_7":
-            ord_c = APPROVED_MARKET["ordinary"].get("content", "Нет данных")
-            exp_c = APPROVED_MARKET["express"].get("content", "Нет данных")
-            high_c = APPROVED_MARKET["high_odds"].get("content", "Нет данных")
-            vip_extra = APPROVED_MARKET["vip_7"].get("content_extra", "Эксклюзивный VIP-матч (кэф 2.0+)")
+            # Активируем подписку в базе на 7 дней
+            add_vip_user(target_user_id)
             
-            full_vip_content = (
-                f"👑 **VIP ПАКЕТ НА СЕГОДНЯ:**\n\n"
-                f"🎯 **Ординар:**\n{ord_c}\n\n"
-                f"🔥 **Экспресс:**\n{exp_c}\n\n"
-                f"💣 **Хай-Кэф:**\n{high_c}\n\n"
-                f"⭐ **Эксклюзивный VIP-бонус (кэф 2.0+):**\n{vip_extra}"
-            )
-            img_bio = generate_prediction_card("👑 VIP-ДОСТУП КО ВСЕМ ПРОГНОЗАМ", full_vip_content, target_user_id, username)
+            # Отправляем текущую подборку
+            await send_vip_bundle_to_user(call.bot, target_user_id, username)
+            await call.answer("👑 VIP-подписка активирована на 7 дней! Прогнозы отправлены.")
         else:
             item_info = APPROVED_MARKET.get(product_code, {})
             content = item_info.get("content", "Доступно.")
             img_bio = generate_prediction_card(f"📦 {item_info.get('name', 'ПРОГНОЗ')}", content, target_user_id, username)
-            
-        await call.bot.send_photo(chat_id=target_user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="paid.png"), caption="🎉 Оплата подтверждена! Ваш прогноз:")
+            await call.bot.send_photo(chat_id=target_user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="paid.png"), caption="🎉 Оплата подтверждена! Ваш прогноз:")
+            await call.answer("Успешно выдано клиенту!")
         
         if target_user_id in USER_PENDING_PURCHASE:
             del USER_PENDING_PURCHASE[target_user_id]
             
-        await call.answer("Успешно выдано клиенту!")
     except Exception as e:
         await call.answer(f"Ошибка: {e}", show_alert=True)
 
@@ -624,18 +665,17 @@ async def admin_schedule(message: Message):
     high_t = APPROVED_MARKET["high_odds"]["close_time"]
     
     moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+        [InlineKeyboardButton(text="✅ Опубликовать и разослать VIP", callback_data="admin_approve_market")],
         [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
         [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
     ])
     
     await status_msg.edit_text(
-        f"📋 **Черновик сформирован!**\nТекущие дедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{report}", 
+        f"📋 **Черновик сформирован!**\nДедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{report}", 
         reply_markup=moderation_kb, 
         parse_mode="Markdown"
     )
 
-# --- МЕНЮ НАСТРОЙКИ ВРЕМЕНИ ПО КАТЕГОРИЯМ ---
 @router.callback_query(F.data == "admin_cat_time_menu")
 async def admin_cat_time_menu(call: CallbackQuery):
     if call.from_user.id != MY_CHAT_ID:
@@ -647,7 +687,7 @@ async def admin_cat_time_menu(call: CallbackQuery):
         [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
     ])
     await call.message.edit_text(
-        "⚙️ **Выберите категорию прогноза, для которой хотите изменить время окончания продаж:**",
+        "⚙️ **Выберите категорию прогноза для изменения дедлайна продаж:**",
         reply_markup=kb
     )
 
@@ -671,11 +711,11 @@ async def select_category_to_set(call: CallbackQuery):
             InlineKeyboardButton(text="22:30", callback_data=f"timeval_22:30"),
             InlineKeyboardButton(text="⌨️ Ввести вручную", callback_data="timeval_custom")
         ],
-        [InlineKeyboardButton(text="◀️ Назад к выбору категорий", callback_data="admin_cat_time_menu")]
+        [InlineKeyboardButton(text="◀️ Назад к категориям", callback_data="admin_cat_time_menu")]
     ])
     
     await call.message.edit_text(
-        f"⏱ Выберите время дедлайна для категории: **{names.get(cat_code, cat_code)}**\nИли нажмите «Ввести вручную»:",
+        f"⏱ Выберите время дедлайна для: **{names.get(cat_code, cat_code)}**",
         reply_markup=time_kb
     )
 
@@ -688,19 +728,17 @@ async def apply_time_value(call: CallbackQuery):
     cat_code = state_data.get("category")
     
     if not cat_code:
-        await call.answer("Ошибка сессии, начните заново.", show_alert=True)
+        await call.answer("Ошибка сессии.", show_alert=True)
         return
         
     if val == "custom":
         ADMIN_STATE[call.from_user.id]["action"] = "waiting_custom_time"
-        await call.message.answer(f"⌨️ Введите точное время дедлайна для выбранной категории в формате `ЧЧ:ММ` (например, `19:15`):")
+        await call.message.answer(f"⌨️ Введите время дедлайна в формате `ЧЧ:ММ` (например, `19:15`):")
         await call.answer()
         return
         
-    # Сохраняем время для конкретной категории
     APPROVED_MARKET[cat_code]["close_time"] = val
     ADMIN_STATE[call.from_user.id] = None
-    
     await show_category_menu_after_change(call.message)
 
 async def show_category_menu_after_change(message: Message):
@@ -709,15 +747,12 @@ async def show_category_menu_after_change(message: Message):
     high_t = APPROVED_MARKET["high_odds"]["close_time"]
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"🎯 Ординар (сейчас: {ord_t})", callback_data="set_cat_ordinary")],
-        [InlineKeyboardButton(text=f"🔥 Экспресс (сейчас: {exp_t})", callback_data="set_cat_express")],
-        [InlineKeyboardButton(text=f"💣 Хай-Кэф (сейчас: {high_t})", callback_data="set_cat_high_odds")],
+        [InlineKeyboardButton(text=f"🎯 Ординар ({ord_t})", callback_data="set_cat_ordinary")],
+        [InlineKeyboardButton(text=f"🔥 Экспресс ({exp_t})", callback_data="set_cat_express")],
+        [InlineKeyboardButton(text=f"💣 Хай-Кэф ({high_t})", callback_data="set_cat_high_odds")],
         [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
     ])
-    await message.edit_text(
-        "✅ Время успешно обновлено!\n\n⚙️ Можете настроить другую категорию или вернуться к публикации:",
-        reply_markup=kb
-    )
+    await message.edit_text("✅ Время успешно обновлено! Настройте другую категорию или вернитесь назад:", reply_markup=kb)
 
 @router.callback_query(F.data == "admin_back_to_publish")
 async def admin_back_to_publish(call: CallbackQuery):
@@ -729,7 +764,7 @@ async def admin_back_to_publish(call: CallbackQuery):
     high_t = APPROVED_MARKET["high_odds"]["close_time"]
     
     moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+        [InlineKeyboardButton(text="✅ Опубликовать и разослать VIP", callback_data="admin_approve_market")],
         [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
         [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
     ])
@@ -739,7 +774,6 @@ async def admin_back_to_publish(call: CallbackQuery):
         parse_mode="Markdown"
     )
 
-# Перехват ручного текстового ввода времени администратором
 @router.message(F.text & (F.from_user.id == MY_CHAT_ID))
 async def admin_text_input(message: Message):
     state = ADMIN_STATE.get(message.from_user.id, {})
@@ -756,18 +790,14 @@ async def admin_text_input(message: Message):
             high_t = APPROVED_MARKET["high_odds"]["close_time"]
             
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=f"🎯 Ординар (сейчас: {ord_t})", callback_data="set_cat_ordinary")],
-                [InlineKeyboardButton(text=f"🔥 Экспресс (сейчас: {exp_t})", callback_data="set_cat_express")],
-                [InlineKeyboardButton(text=f"💣 Хай-Кэф (сейчас: {high_t})", callback_data="set_cat_high_odds")],
+                [InlineKeyboardButton(text=f"🎯 Ординар ({ord_t})", callback_data="set_cat_ordinary")],
+                [InlineKeyboardButton(text=f"🔥 Экспресс ({exp_t})", callback_data="set_cat_express")],
+                [InlineKeyboardButton(text=f"💣 Хай-Кэф ({high_t})", callback_data="set_cat_high_odds")],
                 [InlineKeyboardButton(text="◀️ Назад к публикации", callback_data="admin_back_to_publish")]
             ])
-            await message.answer(
-                f"✅ Время для категории успешно установлено на **{text_time}**!",
-                reply_markup=kb,
-                parse_mode="Markdown"
-            )
+            await message.answer(f"✅ Время установлено на **{text_time}**!", reply_markup=kb, parse_mode="Markdown")
         else:
-            await message.answer("❌ Неверный формат. Введите время в формате `ЧЧ:ММ` (например, `21:30`):")
+            await message.answer("❌ Неверный формат. Введите в формате `ЧЧ:ММ`:")
 
 @router.callback_query(F.data == "admin_approve_market")
 async def admin_approve_market(call: CallbackQuery):
@@ -787,19 +817,37 @@ async def admin_approve_market(call: CallbackQuery):
     history[today_str] = {"prediction_text": draft_text, "status": "pending"}
     save_history(history)
     
+    # АВТОМАТИЧЕСКАЯ РАССЫЛКА АКТИВНЫМ VIP-КЛИЕНТАМ
+    vip_data = load_vip_users()
+    sent_count = 0
+    tz = zoneinfo.ZoneInfo("Asia/Almaty")
+    now_dt = datetime.now(tz)
+    
+    for str_id, expire_str in vip_data.items():
+        try:
+            expire_dt = datetime.fromisoformat(expire_str)
+            if now_dt < expire_dt:
+                u_id = int(str_id)
+                try:
+                    # Пробуем отправить свежий VIP-пакет
+                    await send_vip_bundle_to_user(call.bot, u_id, "vip_client")
+                    sent_count += 1
+                except Exception as e:
+                    logging.error(f"Не удалось отправить VIP рассылку пользователю {u_id}: {e}")
+        except Exception:
+            continue
+
     ord_t = APPROVED_MARKET["ordinary"]["close_time"]
     exp_t = APPROVED_MARKET["express"]["close_time"]
     high_t = APPROVED_MARKET["high_odds"]["close_time"]
     
     await call.message.edit_text(
-        f"✅ **Линия успешно одобрена и опубликована на витрину!**\n"
-        f"⏱ Дедлайны продаж:\n"
-        f"• Ординар: до {ord_t}\n"
-        f"• Экспресс: до {exp_t}\n"
-        f"• Хай-Кэф: до {high_t}\n\n{draft_text}", 
+        f"✅ **Линия одобрена, опубликована и разослана!**\n"
+        f"👑 Автоматически отправлено активным VIP-клиентам: **{sent_count} чел.**\n"
+        f"⏱ Дедлайны: Ординар ({ord_t}) | Экспресс ({exp_t}) | Хай-Кэф ({high_t})\n\n{draft_text}", 
         parse_mode="Markdown"
     )
-    await call.answer("Опубликовано!")
+    await call.answer("Опубликовано и разослано!")
 
 @router.callback_query(F.data == "admin_retry_market")
 async def admin_retry_market(call: CallbackQuery):
@@ -813,7 +861,7 @@ async def admin_retry_market(call: CallbackQuery):
         PENDING_DRAFT["text"] = report
         
         moderation_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Опубликовать на витрину", callback_data="admin_approve_market")],
+            [InlineKeyboardButton(text="✅ Опубликовать и разослать VIP", callback_data="admin_approve_market")],
             [InlineKeyboardButton(text="⚙️ Настроить время по категориям", callback_data="admin_cat_time_menu")],
             [InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="admin_retry_market")]
         ])
