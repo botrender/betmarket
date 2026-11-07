@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ПРЕМИАЛЬНЫЙ ДИЗАЙН КУПОНОВ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (АВТОМАТИЧЕСКАЯ РОТАЦИЯ МОДЕЛЕЙ ПРИ ЛИМИТАХ) ===
 import asyncio
 import logging
 import sys
@@ -44,10 +44,11 @@ VIP_USERS_FILE = "vip_users.json"
 
 genai.configure(api_key=GEMINI_API_KEY)
 
+# Список моделей для автоматической ротации при исчерпании лимитов
 MODEL_CANDIDATES = [
-    'gemini-2.0-flash',
     'gemini-1.5-flash',
     'gemini-1.5-pro',
+    'gemini-2.0-flash',
     'gemini-2.5-flash',
     'gemini-3.6-flash'
 ]
@@ -209,17 +210,22 @@ async def fetch_espn_results_comprehensive(target_date):
     return completed_games
 
 async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
+    """Умный метод: автоматически перебирает модели при ошибках лимитов (429)"""
     last_error = None
     for model_name in MODEL_CANDIDATES:
         try:
+            logging.info(f"🔄 Пробуем отправить запрос к Gemini через модель: {model_name}")
             model = genai.GenerativeModel(model_name=model_name, system_instruction=system_instruction)
             response = await asyncio.to_thread(model.generate_content, prompt)
             return response.text.strip()
         except Exception as e:
             last_error = e
+            logging.warning(f"⚠️ Модель {model_name} недочерпала лимит или выдала ошибку: {e}. Переключаюсь на следующую...")
             await asyncio.sleep(1)
             continue
-    raise last_error
+    
+    # Если все модели исчерпали лимиты
+    raise Exception(f"❌ Все модели Gemini исчерпали лимиты. Последняя ошибка: {last_error}")
 
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
@@ -268,12 +274,11 @@ async def build_full_daily_report() -> str:
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
-    """Премиальный дизайн купона: градиентный фон, стеклянная карточка, золотые акценты и сетка защиты"""
+    """Премиальный дизайн купона с градиентом, печатью и защитой"""
     width, height = 900, 1150
     img = Image.new('RGB', (width, height), color=(10, 15, 30))
     draw = ImageDraw.Draw(img)
     
-    # Плавный градиент фона для дорогого вида
     for y in range(height):
         r = int(10 + (y / height) * 15)
         g = int(15 + (y / height) * 20)
@@ -303,7 +308,6 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_stamp = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-    # Сетка защитных водяных знаков (ID и ник клиента по всей картинке)
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     line_toggle = 0
@@ -317,20 +321,15 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
-    # Элегантная шапка купона с золотистой рамкой
     draw.rounded_rectangle([(35, 35), (width - 35, 105)], radius=12, fill=(20, 30, 55), outline=(234, 179, 8), width=2)
     coupon_num = random.randint(800000000, 999999999)
     draw.text((55, 52), "BETMARKET KZ", fill=(255, 255, 255), font=font_header)
     draw.text((width - 250, 56), f"Купон № {coupon_num}", fill=(234, 179, 8), font=font_header)
 
-    # Премиальная карточка контента (эффект стекла)
     draw.rounded_rectangle([(35, 130), (width - 35, height - 120)], radius=15, fill=(15, 23, 42), outline=(51, 65, 85), width=2)
-    
-    # Заголовок категории внутри карточки
     draw.text((60, 160), title, fill=(234, 179, 8), font=font_title)
     draw.line([(60, 195), (width - 60, 195)], fill=(51, 65, 85), width=1)
 
-    # Текст прогноза с аккуратным переносом
     offset = 220
     max_line_length = 48 
     cleaned_content = text_content.replace("**", "").replace("__", "")
@@ -352,14 +351,12 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             draw.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 38
 
-    # Предупреждение о бане и лицензия в нижней панели
     draw.rounded_rectangle([(35, height - 100), (width - 35, height - 35)], radius=10, fill=(127, 29, 29), outline=(239, 68, 68), width=1)
     warning_text = "⚠️ ВНИМАНИЕ: Перепродажа и слив караются вечным баном!"
     license_text = f"Персональная лицензия выдана: @{username} (ID: {user_id})"
     draw.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
     draw.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
 
-    # Стильная печать-логотип в правом верхнем углу шапки
     stamp_x, stamp_y = width - 130, 48
     draw.rounded_rectangle([(stamp_x, stamp_y), (stamp_x + 75, stamp_y + 26)], radius=6, fill=(234, 179, 8))
     draw.text((stamp_x + 8, stamp_y + 6), "VIP VERIFIED", fill=(15, 23, 42), font=font_stamp)
@@ -432,7 +429,6 @@ async def parse_and_store_market(text_block: str):
         APPROVED_MARKET["vip_7"]["content_extra"] = "\n".join(buf["vip_bonus"])
 
 async def send_vip_bundle_to_user(bot: Bot, user_id: int, username: str):
-    """Отправка VIP-клиенту 4 отдельных премиальных купонов по категориям"""
     ord_c = APPROVED_MARKET["ordinary"].get("content", "Нет доступных данных")
     exp_c = APPROVED_MARKET["express"].get("content", "Нет доступных данных")
     high_c = APPROVED_MARKET["high_odds"].get("content", "Нет доступных данных")
