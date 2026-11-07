@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (VIP-АВТОМАТИЗАЦИЯ НА 7 ДНЕЙ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ФИНАЛЬНАЯ ВЕРСИЯ С VIP И ДЕДЛАЙНАМИ) ===
 import asyncio
 import logging
 import sys
@@ -117,24 +117,9 @@ def save_vip_users(data):
 def add_vip_user(user_id: int):
     vip_data = load_vip_users()
     tz = zoneinfo.ZoneInfo("Asia/Almaty")
-    # Подписка на 7 дней от текущего момента
     expire_dt = datetime.now(tz) + timedelta(days=7)
     vip_data[str(user_id)] = expire_dt.isoformat()
     save_vip_users(vip_data)
-
-def is_user_vip(user_id: int) -> bool:
-    vip_data = load_vip_users()
-    str_id = str(user_id)
-    if str_id not in vip_data:
-        return False
-    try:
-        tz = zoneinfo.ZoneInfo("Asia/Almaty")
-        expire_dt = datetime.fromisoformat(vip_data[str_id])
-        if datetime.now(tz) < expire_dt:
-            return True
-    except Exception:
-        pass
-    return False
 
 async def handle_ping(request):
     return web.Response(text="BetMarket KZ Engine is running 24/7!")
@@ -282,21 +267,21 @@ async def build_full_daily_report() -> str:
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
-    width, height = 900, 1100
+    width, height = 900, 1400
     img = Image.new('RGB', (width, height), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
     
     try:
-        font_title = ImageFont.truetype("DejaVuSans.ttf", 28)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 20)
-        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 20)
-        font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
+        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 18)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 15)
     except IOError:
         try:
-            font_title = ImageFont.truetype("arial.ttf", 28)
-            font_text = ImageFont.truetype("arial.ttf", 20)
-            font_watermark = ImageFont.truetype("arial.ttf", 20)
-            font_small = ImageFont.truetype("arial.ttf", 16)
+            font_title = ImageFont.truetype("arial.ttf", 26)
+            font_text = ImageFont.truetype("arial.ttf", 18)
+            font_watermark = ImageFont.truetype("arial.ttf", 18)
+            font_small = ImageFont.truetype("arial.ttf", 15)
         except IOError:
             font_title = ImageFont.load_default()
             font_text = ImageFont.load_default()
@@ -306,23 +291,28 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     line_toggle = 0
-    for y in range(40, height, 90):
+    for y in range(40, height, 100):
         watermark_str = f"ID: {user_id}" if line_toggle % 2 == 0 else f"@{username}"
-        for x in range(20, width, 280):
-            d_txt.text((x, y), watermark_str, fill=(100, 116, 139, 120), font=font_watermark)
+        for x in range(20, width, 260):
+            d_txt.text((x, y), watermark_str, fill=(100, 116, 139, 70), font=font_watermark)
         line_toggle += 1
                 
     img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle([(30, 30), (width - 30, 90)], fill=(30, 58, 138))
-    draw.text((50, 38), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
-    draw.text((50, 115), title, fill=(250, 204, 21), font=font_title)
+    draw.rectangle([(30, 30), (width - 30, 95)], fill=(30, 58, 138))
+    draw.text((50, 42), "BetMarket KZ | Официальный Прогноз", fill=(255, 255, 255), font=font_title)
+    draw.text((50, 120), title, fill=(250, 204, 21), font=font_title)
     
     offset = 175
-    max_line_length = 50
+    max_line_length = 55
     
-    for paragraph in text_content.split('\n'):
+    cleaned_content = text_content.replace("**", "").replace("__", "")
+
+    for paragraph in cleaned_content.split('\n'):
+        if not paragraph.strip():
+            offset += 15
+            continue
         words = paragraph.split(' ')
         current_line = ""
         for word in words:
@@ -330,15 +320,15 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
                 current_line += (" " + word) if current_line else word
             else:
                 draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
-                offset += 30
+                offset += 26
                 current_line = word
         if current_line:
             draw.text((50, offset), current_line, fill=(241, 245, 249), font=font_text)
-            offset += 35
+            offset += 30
 
-    draw.rectangle([(30, height - 85), (width - 30, height - 25)], fill=(185, 28, 28))
+    draw.rectangle([(30, height - 70), (width - 30, height - 20)], fill=(185, 28, 28))
     warning_text = f"Персональная лицензия: @{username} (ID: {user_id})"
-    draw.text((40, height - 72), warning_text, fill=(255, 255, 255), font=font_small)
+    draw.text((40, height - 55), warning_text, fill=(255, 255, 255), font=font_small)
 
     bio = BytesIO()
     bio.name = 'prediction.png'
@@ -413,15 +403,19 @@ async def send_vip_bundle_to_user(bot: Bot, user_id: int, username: str):
     high_c = APPROVED_MARKET["high_odds"].get("content", "Нет данных")
     vip_extra = APPROVED_MARKET["vip_7"].get("content_extra", "Эксклюзивный VIP-матч (кэф 2.0+)")
     
-    full_vip_content = (
-        f"👑 **VIP ПАКЕТ ПРОГНОЗОВ НА СЕГОДНЯ:**\n\n"
-        f"🎯 **Ординар:**\n{ord_c}\n\n"
-        f"🔥 **Экспресс:**\n{exp_c}\n\n"
-        f"💣 **Хай-Кэф:**\n{high_c}\n\n"
-        f"⭐ **Эксклюзивный VIP-бонус (кэф 2.0+):**\n{vip_extra}"
+    vip_card_text = (
+        f"ОРДИНАР ДНЯ:\n{ord_c}\n\n"
+        f"ЭКСПРЕСС 2-3:\n{exp_c}\n\n"
+        f"ХАЙ-КЭФ ЭКСПРЕСС:\n{high_c}\n\n"
+        f"⭐ VIP-БОНУС (Кэф 2.0+):\n{vip_extra}"
     )
-    img_bio = generate_prediction_card("👑 VIP-ДОСТУП КО ВСЕМ ПРОГНОЗАМ", full_vip_content, user_id, username)
-    await bot.send_photo(chat_id=user_id, photo=BufferedInputFile(img_bio.getvalue(), filename="vip_daily.png"), caption="🎁 Ваши ежедневные VIP-прогнозы по активной подписке!")
+    
+    img_bio = generate_prediction_card("👑 VIP-ПАКЕТ ПРОГНОЗОВ НА СЕГОДНЯ", vip_card_text, user_id, username)
+    await bot.send_photo(
+        chat_id=user_id, 
+        photo=BufferedInputFile(img_bio.getvalue(), filename="vip_daily.png"), 
+        caption="🎉 Ваша ежедневная VIP-подписка успешно отправлена!"
+    )
 
 async def auto_send_daily_bets(bot: Bot):
     logging.info("⏰ Запуск автоматической генерации черновика линии (16:30)...")
@@ -475,20 +469,14 @@ async def audit_yesterday_predictions(bot: Bot):
         logging.error(f"❌ Ошибка аудита: {e}")
 
 def is_sale_active(close_time_str: str) -> bool:
-    """Умная проверка дедлайна с учетом ночных матчей (после полуночи)"""
+    """Умная проверка дедлайна с поддержкой ночных матчей"""
     try:
         tz = zoneinfo.ZoneInfo("Asia/Almaty")
         now = datetime.now(tz)
         h, m = map(int, close_time_str.split(":"))
-        
-        # Создаем время дедлайна на сегодня
         close_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
         
-        # Если дедлайн указан глубокой ночью (например, 00:50, 01:00), 
-        # а сейчас вечер предыдущего дня, то продажи активны.
-        # Если сейчас уже ночь после дедлайна — продажи закрываются.
         if h < 6 and now.hour >= 18:
-            # Матч ночью следующего дня, сегодня продажи еще идут
             return True
             
         return now < close_dt
@@ -644,10 +632,7 @@ async def grant_product(call: CallbackQuery):
         username = target_chat.username or "no_username"
         
         if product_code == "vip_7":
-            # Активируем подписку в базе на 7 дней
             add_vip_user(target_user_id)
-            
-            # Отправляем текущую подборку
             await send_vip_bundle_to_user(call.bot, target_user_id, username)
             await call.answer("👑 VIP-подписка активирована на 7 дней! Прогнозы отправлены.")
         else:
@@ -828,7 +813,6 @@ async def admin_approve_market(call: CallbackQuery):
     history[today_str] = {"prediction_text": draft_text, "status": "pending"}
     save_history(history)
     
-    # АВТОМАТИЧЕСКАЯ РАССЫЛКА АКТИВНЫМ VIP-КЛИЕНТАМ
     vip_data = load_vip_users()
     sent_count = 0
     tz = zoneinfo.ZoneInfo("Asia/Almaty")
@@ -840,7 +824,6 @@ async def admin_approve_market(call: CallbackQuery):
             if now_dt < expire_dt:
                 u_id = int(str_id)
                 try:
-                    # Пробуем отправить свежий VIP-пакет
                     await send_vip_bundle_to_user(call.bot, u_id, "vip_client")
                     sent_count += 1
                 except Exception as e:
