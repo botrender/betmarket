@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ПЕЧАТЬ №1, ЯРКАЯ ЗАЩИТА, СМЕЩЕННЫЙ VIP, GEMINI + GROQ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (КРАСИВАЯ ПЕЧАТЬ №1 + ДИАГОНАЛЬНЫЙ ВОДЯНОЙ ЗНАК) ===
 import asyncio
 import logging
 import sys
@@ -317,28 +317,55 @@ async def build_full_daily_report() -> str:
     prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов, включая специальный VIP-бонус с коэффициентом от 2.0."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
-def draw_variant_1_stamp(draw: ImageDraw.ImageDraw, font_big: ImageFont.ImageFont, font_mid: ImageFont.ImageFont, font_small: ImageFont.ImageFont, cx: int, cy: int, r: int):
-    """Отрисовка выбранного логотипа-печати Вариант №1 (Syndicate Stamp)"""
-    gold = (234, 179, 8)
+def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
+    """Отрисовка премиальной круглой печати Syndicate Stamp Вариант №1 в высоком качестве"""
+    stamp_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(stamp_layer)
     
-    # Внешний двойной контур
-    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold, width=3)
-    draw.ellipse([(cx - r + 5, cy - r + 5), (cx + r - 5, cy + r - 5)], outline=gold, width=1)
-    draw.ellipse([(cx - r + 10, cy - r + 10), (cx + r - 10, cy + r - 10)], outline=gold, width=2)
+    gold_outer = (234, 179, 8, 240)
+    gold_inner = (250, 204, 21, 220)
+    text_gold = (253, 224, 71, 255)
+    bg_dark = (15, 23, 42, 230)
+    
+    # Фон печати
+    d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=bg_dark)
+    
+    # Контуры кольца
+    d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold_outer, width=4)
+    d.ellipse([(cx - r + 6, cy - r + 6), (cx + r - 6, cy + r - 6)], outline=gold_inner, width=2)
+    d.ellipse([(cx - r + 12, cy - r + 12), (cx + r - 12, cy + r - 12)], outline=gold_outer, width=2)
+
+    try:
+        f_bm = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
+        f_ver = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
+        f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 8)
+    except:
+        try:
+            f_bm = ImageFont.truetype("arial-bold.ttf", 30)
+            f_ver = ImageFont.truetype("arial-bold.ttf", 11)
+            f_sub = ImageFont.truetype("arial-bold.ttf", 8)
+        except:
+            f_bm = f_ver = f_sub = ImageFont.load_default()
 
     # Корона сверху
-    crown_y = cy - 35
-    crown = [(cx - 18, crown_y + 12), (cx - 24, crown_y - 6), (cx - 10, crown_y + 4), (cx, crown_y - 12), (cx + 10, crown_y + 4), (cx + 24, crown_y - 6), (cx + 18, crown_y + 12)]
-    draw.polygon(crown, fill=gold)
+    crown_y = cy - 36
+    crown = [
+        (cx - 16, crown_y + 12), (cx - 22, crown_y - 6), (cx - 8, crown_y + 4), 
+        (cx, crown_y - 14), (cx + 8, crown_y + 4), (cx + 22, crown_y - 6), (cx + 16, crown_y + 12)
+    ]
+    d.polygon(crown, fill=text_gold)
 
-    # Инициалы по центру «BM»
-    draw.text((cx - 22, cy - 14), "BM", fill=gold, font=font_big)
+    # Буквы BM
+    d.text((cx - 24, cy - 16), "BM", fill=text_gold, font=f_bm)
 
-    # Надпись «VERIFIED»
-    draw.text((cx - 28, cy + 16), "VERIFIED", fill=gold, font=font_mid)
+    # VERIFIED
+    d.text((cx - 32, cy + 15), "VERIFIED", fill=text_gold, font=f_ver)
     
-    # Нижний подзаголовок
-    draw.text((cx - 36, cy + 30), "BETMARKET KZ", fill=(148, 163, 184), font=font_small)
+    # BETMARKET KZ OFFICIAL
+    d.text((cx - 42, cy + 30), "BETMARKET KZ", fill=(203, 213, 225, 255), font=f_sub)
+
+    # Накладываем печать на купон
+    base_img.alpha_composite(stamp_layer)
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
     width, height = 900, 1150
@@ -355,69 +382,62 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 17)
-        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 20) # Крупный и четкий
+        font_watermark_diag = ImageFont.truetype("DejaVuSans-Bold.ttf", 28) # Крупный диагональный шрифт
         font_stamp_lbl = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
-        
-        font_stamp_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        font_stamp_mid = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
-        font_stamp_small = ImageFont.truetype("DejaVuSans-Bold.ttf", 7)
     except IOError:
         try:
             font_header = ImageFont.truetype("arial.ttf", 22)
             font_title = ImageFont.truetype("arial.ttf", 20)
             font_text = ImageFont.truetype("arial.ttf", 17)
-            font_watermark = ImageFont.truetype("arial-bold.ttf", 20)
+            font_watermark_diag = ImageFont.truetype("arial-bold.ttf", 28)
             font_stamp_lbl = ImageFont.truetype("arial-bold.ttf", 11)
             font_small = ImageFont.truetype("arial.ttf", 13)
-            
-            font_stamp_big = ImageFont.truetype("arial-bold.ttf", 26)
-            font_stamp_mid = ImageFont.truetype("arial-bold.ttf", 10)
-            font_stamp_small = ImageFont.truetype("arial-bold.ttf", 7)
         except IOError:
             font_header = ImageFont.load_default()
             font_title = ImageFont.load_default()
             font_text = ImageFont.load_default()
-            font_watermark = ImageFont.load_default()
+            font_watermark_diag = ImageFont.load_default()
             font_stamp_lbl = ImageFont.load_default()
             font_small = ImageFont.load_default()
-            font_stamp_big = ImageFont.load_default()
-            font_stamp_mid = ImageFont.load_default()
-            font_stamp_small = ImageFont.load_default()
 
-    # ДИАГОНАЛЬНАЯ ЯРКАЯ ЗАЩИТА: Ник и ID четко видны поперек всей карточки
+    # МОЩНАЯ ЗАЩИТА: Создаем большой слой для водяных знаков ПО ДИАГОНАЛИ через весь прогноз
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     watermark_str = f"🛡 ID: {user_id} | @{username} 🛡"
     
-    line_toggle = 0
-    for y in range(80, height, 110):
-        shift = 160 if line_toggle % 2 == 0 else 0
-        for x in range(-100 + shift, width + 100, 360):
-            # Повышенная прозрачность (85/255) делает защиту отчетливо видимой
-            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 85), font=font_watermark)
-        line_toggle += 1
-                
-    img = Image.alpha_composite(img.convert('RGBA'), txt_layer).convert('RGB')
-    draw = ImageDraw.Draw(img)
+    # Рисуем повторяющиеся диагональные полосы водяного знака
+    for start_y in range(-height, height * 2, 180):
+        # Создаем временное холст для отдельной диагональной строки текста, чтобы повернуть её
+        line_img = Image.new('RGBA', (width * 2, 60), (0, 0, 0, 0))
+        line_draw = ImageDraw.Draw(line_img)
+        # Яркий, но прозрачный водяной знак (альфа 75 из 255), чтобы он пересекал текст и был виден везде
+        line_draw.text((20, 10), f"{watermark_str}     {watermark_str}     {watermark_str}", fill=(255, 255, 255, 75), font=font_watermark_diag)
+        
+        # Поворачиваем строку на -30 градусов (диагональ)
+        rotated_line = line_img.rotate(35, expand=1, resample=Image.Resampling.BICUBIC)
+        txt_layer.paste(rotated_line, (start_y - 200, start_y // 2), rotated_line)
+
+    # Композируем диагональную защиту на базовую картинку
+    img_rgba = img.convert('RGBA')
+    img_rgba = Image.alpha_composite(img_rgba, txt_layer)
 
     # Шапка купона
-    draw.rounded_rectangle([(35, 35), (width - 35, 105)], radius=12, fill=(20, 30, 55), outline=(234, 179, 8), width=2)
+    draw_comp = ImageDraw.Draw(img_rgba)
+    draw_comp.rounded_rectangle([(35, 35), (width - 35, 105)], radius=12, fill=(20, 30, 55), outline=(234, 179, 8), width=2)
     coupon_num = random.randint(800000000, 999999999)
-    draw.text((55, 52), "BETMARKET KZ", fill=(255, 255, 255), font=font_header)
-    
-    # Купон № смещен влево, чтобы освободить место под VIP VERIFIED
-    draw.text((width - 450, 56), f"Купон № {coupon_num}", fill=(234, 179, 8), font=font_header)
+    draw_comp.text((55, 52), "BETMARKET KZ", fill=(255, 255, 255), font=font_header)
+    draw_comp.text((width - 450, 56), f"Купон № {coupon_num}", fill=(234, 179, 8), font=font_header)
 
-    # ИСПРАВЛЕНИЕ: Плашка VIP VERIFIED аккуратно сдвинута влево и полностью влезает в шапку
+    # Плашка VIP VERIFIED в шапке
     stamp_x, stamp_y = width - 180, 54
-    draw.rounded_rectangle([(stamp_x, stamp_y), (stamp_x + 130, stamp_y + 30)], radius=6, fill=(234, 179, 8))
-    draw.text((stamp_x + 14, stamp_y + 8), "VIP VERIFIED", fill=(15, 23, 42), font=font_stamp_lbl)
+    draw_comp.rounded_rectangle([(stamp_x, stamp_y), (stamp_x + 130, stamp_y + 30)], radius=6, fill=(234, 179, 8))
+    draw_comp.text((stamp_x + 14, stamp_y + 8), "VIP VERIFIED", fill=(15, 23, 42), font=font_stamp_lbl)
 
-    # Текстовая карточка
-    draw.rounded_rectangle([(35, 130), (width - 35, height - 120)], radius=15, fill=(15, 23, 42), outline=(51, 65, 85), width=2)
-    draw.text((60, 160), title, fill=(234, 179, 8), font=font_title)
-    draw.line([(60, 195), (width - 60, 195)], fill=(51, 65, 85), width=1)
+    # Текстовая карточка прогноза
+    draw_comp.rounded_rectangle([(35, 130), (width - 35, height - 120)], radius=15, fill=(15, 23, 42), outline=(51, 65, 85), width=2)
+    draw_comp.text((60, 160), title, fill=(234, 179, 8), font=font_title)
+    draw_comp.line([(60, 195), (width - 60, 195)], fill=(51, 65, 85), width=1)
 
     offset = 220
     max_line_length = 48 
@@ -433,26 +453,26 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             if len(current_line + " " + word) <= max_line_length:
                 current_line += (" " + word) if current_line else word
             else:
-                draw.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
+                draw_comp.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
                 offset += 32
                 current_line = word
         if current_line:
-            draw.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
+            draw_comp.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 38
 
-    # НОВЫЙ ЭЛЕМЕНТ: Фирменный логотип-печать Вариант №1 (Syndicate Stamp) в правом нижнем углу карточки
-    draw_variant_1_stamp(draw, font_stamp_big, font_stamp_mid, font_stamp_small, cx=width - 130, cy=height - 210, r=55)
+    # ВЫЗОВ НАСТОЯЩЕЙ КРАСИВОЙ ПЕЧАТИ В ПРАВОМ НИЖНЕМ УГЛУ
+    draw_realistic_stamp(img_rgba, cx=width - 130, cy=height - 210, r=55)
 
-    # Нижнее предупреждение
-    draw.rounded_rectangle([(35, height - 100), (width - 35, height - 35)], radius=10, fill=(127, 29, 29), outline=(239, 68, 68), width=1)
+    # Нижнее предупреждение о бане
+    draw_comp.rounded_rectangle([(35, height - 100), (width - 35, height - 35)], radius=10, fill=(127, 29, 29), outline=(239, 68, 68), width=1)
     warning_text = "⚠️ ВНИМАНИЕ: Перепродажа и слив караются вечным баном!"
     license_text = f"Персональная лицензия выдана: @{username} (ID: {user_id})"
-    draw.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
-    draw.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
+    draw_comp.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
+    draw_comp.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
 
     bio = BytesIO()
     bio.name = 'coupon_premium.png'
-    img.save(bio, 'PNG')
+    img_rgba.convert('RGB').save(bio, 'PNG')
     bio.seek(0)
     return bio
 
@@ -1008,6 +1028,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.main(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Бот остановлен.")
