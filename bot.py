@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ОБНОВЛЕННЫЕ МОДЕЛИ ИИ + ПЕЧАТЬ + ВОДЯНЫЕ ЗНАКИ ПОВЕРХ ВСЕГО) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (УМНАЯ СЕТКА, ЛИГИ И ВИДЫ СПОРТА НА РУССКОМ) ===
 import asyncio
 import logging
 import sys
@@ -59,7 +59,6 @@ KASPI_CARD = "4400 4302 7720 4696"
 HISTORY_FILE = "history.json"
 VIP_USERS_FILE = "vip_users.json"
 
-# ОБНОВЛЕННЫЙ СПИСОК АКТУАЛЬНЫХ МОДЕЛЕЙ
 MODEL_CANDIDATES = [
     'gemini-3.8-flash',
     'gemini-3.6-flash',
@@ -269,26 +268,28 @@ async def ask_gemini_raw(prompt: str, system_instruction: str) -> str:
     except Exception as groq_err:
         raise Exception(f"❌ Все ИИ исчерпали лимиты. Gemini: {last_error} | Groq: {groq_err}")
 
+# ОБНОВЛЕННЫЙ ПРОМПТ ДЛЯ ПОНЯТНЫХ НАЗВАНИЙ И ЛИГ НА РУССКОМ ЯЗЫКЕ
 SYSTEM_ANALYST_INSTRUCTION = """
 Ты — главный спортивный аналитик и шеф-редактор маркетплейса BetMarket KZ.
 Твоя задача — отобрать из предложенного списка реальных матчей на СЕГОДНЯ самые надежные исходы и составить VIP-бонус.
 ВАЖНО: Никогда не выдумывай коэффициенты! Указывай реальные рыночные котировки.
+ВАЖНО ДЛЯ НОВИЧКОВ: Пиши названия команд на русском языке или в привычной транслитерации с обязательным указанием вида спорта и турнира (например: "⚽️ [АПЛ] Манчестер Юнайтед — Астон Вилла" или "🏒 [НХЛ] Виннипег Джетс — Тампа Бэй"). Пользователям должно быть предельно понятно, что это за матч.
 
 Строгий формат ответа:
 Бесплатный прогноз: 
-[Матч] — [Ставка]
+[Турнир/Лига] [Команда 1] — [Команда 2] — [Ставка]
 
 Ординар: 
-[Матч] — [Ставка]
+[Турнир/Лига] [Команда 1] — [Команда 2] — [Ставка]
 
 Экспресс: 
-[Матч 1] + [Матч 2] (Итоговый кэф 1.80-2.20)
+[Турнир] [Матч 1] + [Турнир] [Матч 2] (Итоговый кэф 1.80-2.20)
 
 Хай-кэф: 
-[Матч 1] + [Матч 2] + [Матч 3] (Итоговый кэф от 4.00 до 7.00)
+[Турнир] [Матч 1] + [Турнир] [Матч 2] + [Турнир] [Матч 3] (Итоговый кэф от 4.00 до 7.00)
 
 VIP-бонус:
-[Матч] — [Ставка] (Эксклюзивный коэффициент не ниже 2.00)
+[Турнир] [Матч] — [Ставка] (Эксклюзивный коэффициент не ниже 2.00)
 
 ---
 Аналитическое обоснование:
@@ -312,7 +313,7 @@ async def build_full_daily_report() -> str:
         return "⚠️ На сегодня через ESPN API не найдено матчей в топ-лигах."
         
     matches_text = "\n\n".join(all_matches)
-    prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов, включая специальный VIP-бонус с коэффициентом от 2.0."
+    prompt = f"Вот список реальных матчей на сегодня из официального календаря:\n{matches_text}\n\nСформируй профессиональный маркет-лист прогнозов на русском языке с указанием турниров, включая специальный VIP-бонус с коэффициентом от 2.0."
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
@@ -369,7 +370,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 17)
-        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
         font_stamp_lbl = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
     except IOError:
@@ -377,7 +378,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_header = ImageFont.truetype("arial.ttf", 22)
             font_title = ImageFont.truetype("arial.ttf", 20)
             font_text = ImageFont.truetype("arial.ttf", 17)
-            font_watermark = ImageFont.truetype("arial-bold.ttf", 16)
+            font_watermark = ImageFont.truetype("arial-bold.ttf", 15)
             font_stamp_lbl = ImageFont.truetype("arial-bold.ttf", 11)
             font_small = ImageFont.truetype("arial.ttf", 13)
         except IOError:
@@ -408,7 +409,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     draw_comp.line([(60, 195), (width - 60, 195)], fill=(51, 65, 85), width=1)
 
     offset = 220
-    max_line_length = 48 
+    max_line_length = 46 
     cleaned_content = text_content.replace("**", "").replace("__", "")
 
     for paragraph in cleaned_content.split('\n'):
@@ -438,14 +439,14 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     draw_comp.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
     draw_comp.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
 
-    # ФИНАЛЬНЫЙ СЛОЙ: Водяные знаки строго поверх всего
+    # СЕТКА ВОДЯНЫХ ЗНАКОВ С УМНЫМ СМЕЩЕНИЕМ (начинается с y=210, чтобы не задевать заголовок карточки)
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
     watermark_str = f"ID: {user_id} | @{username}"
     
-    for y in range(160, height - 120, 100):
+    for y in range(210, height - 120, 105):
         for x in range(30, width, 310):
-            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 85), font=font_watermark)
+            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 80), font=font_watermark)
 
     img_rgba = Image.alpha_composite(img_rgba, txt_layer)
 
