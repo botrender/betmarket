@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (КРАСИВАЯ ПЕЧАТЬ №1 + ДИАГОНАЛЬНЫЙ ВОДЯНОЙ ЗНАК) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (GEMINI + GROQ, ПЕЧАТЬ №1, СЕТКА ВОДЯНЫХ ЗНАКОВ) ===
 import asyncio
 import logging
 import sys
@@ -6,7 +6,6 @@ import json
 import os
 import random
 import urllib.request
-import math
 from datetime import datetime, timedelta
 import zoneinfo
 from aiohttp import web, ClientSession
@@ -74,28 +73,28 @@ APPROVED_MARKET = {
     "ordinary": {
         "name": "🎯 Ординар дня", 
         "price_kz": 1500, 
-        "stars": 50, 
+        "stars": 140, 
         "close_time": "19:00", 
         "content": None
     },
     "express": {
         "name": "🔥 Экспресс 2-3", 
         "price_kz": 2500, 
-        "stars": 80, 
+        "stars": 230, 
         "close_time": "21:00", 
         "content": None
     },
     "high_odds": {
         "name": "💣 Хай-Кэф Экспресс (Кэф 4-7)", 
         "price_kz": 4000, 
-        "stars": 130, 
+        "stars": 370, 
         "close_time": "22:30", 
         "content": None
     },
     "vip_7": {
         "name": "👑 VIP-Подписка (Все прогнозы на 7 дней)", 
         "price_kz": 5000, 
-        "stars": 160, 
+        "stars": 460, 
         "active": True, 
         "content": "👑 VIP-Доступ ко всем прогнозам (Ординар, Экспресс, Хай-Кэф) + Эксклюзивный VIP-матч (кэф 2.0+)."
     }
@@ -318,7 +317,7 @@ async def build_full_daily_report() -> str:
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
-    """Отрисовка премиальной круглой печати Syndicate Stamp Вариант №1 в высоком качестве"""
+    """Отрисовка премиальной круглой печати Вариант №1 (Syndicate Stamp)"""
     stamp_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(stamp_layer)
     
@@ -327,10 +326,7 @@ def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
     text_gold = (253, 224, 71, 255)
     bg_dark = (15, 23, 42, 230)
     
-    # Фон печати
     d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=bg_dark)
-    
-    # Контуры кольца
     d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold_outer, width=4)
     d.ellipse([(cx - r + 6, cy - r + 6), (cx + r - 6, cy + r - 6)], outline=gold_inner, width=2)
     d.ellipse([(cx - r + 12, cy - r + 12), (cx + r - 12, cy + r - 12)], outline=gold_outer, width=2)
@@ -347,24 +343,16 @@ def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
         except:
             f_bm = f_ver = f_sub = ImageFont.load_default()
 
-    # Корона сверху
     crown_y = cy - 36
     crown = [
         (cx - 16, crown_y + 12), (cx - 22, crown_y - 6), (cx - 8, crown_y + 4), 
         (cx, crown_y - 14), (cx + 8, crown_y + 4), (cx + 22, crown_y - 6), (cx + 16, crown_y + 12)
     ]
     d.polygon(crown, fill=text_gold)
-
-    # Буквы BM
     d.text((cx - 24, cy - 16), "BM", fill=text_gold, font=f_bm)
-
-    # VERIFIED
     d.text((cx - 32, cy + 15), "VERIFIED", fill=text_gold, font=f_ver)
-    
-    # BETMARKET KZ OFFICIAL
     d.text((cx - 42, cy + 30), "BETMARKET KZ", fill=(203, 213, 225, 255), font=f_sub)
 
-    # Накладываем печать на купон
     base_img.alpha_composite(stamp_layer)
 
 def generate_prediction_card(title: str, text_content: str, user_id: int, username: str) -> BytesIO:
@@ -382,7 +370,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 17)
-        font_watermark_diag = ImageFont.truetype("DejaVuSans-Bold.ttf", 28) # Крупный диагональный шрифт
+        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 14)
         font_stamp_lbl = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
     except IOError:
@@ -390,35 +378,26 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_header = ImageFont.truetype("arial.ttf", 22)
             font_title = ImageFont.truetype("arial.ttf", 20)
             font_text = ImageFont.truetype("arial.ttf", 17)
-            font_watermark_diag = ImageFont.truetype("arial-bold.ttf", 28)
+            font_watermark = ImageFont.truetype("arial.ttf", 14)
             font_stamp_lbl = ImageFont.truetype("arial-bold.ttf", 11)
             font_small = ImageFont.truetype("arial.ttf", 13)
         except IOError:
             font_header = ImageFont.load_default()
             font_title = ImageFont.load_default()
             font_text = ImageFont.load_default()
-            font_watermark_diag = ImageFont.load_default()
+            font_watermark = ImageFont.load_default()
             font_stamp_lbl = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-    # МОЩНАЯ ЗАЩИТА: Создаем большой слой для водяных знаков ПО ДИАГОНАЛИ через весь прогноз
+    # СЕТКА ВОДЯНЫХ ЗНАКОВ КАК НА РЕФЕРЕНСЕ
     txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d_txt = ImageDraw.Draw(txt_layer)
-    watermark_str = f"🛡 ID: {user_id} | @{username} 🛡"
+    watermark_str = f"ID: {user_id} | @{username}"
     
-    # Рисуем повторяющиеся диагональные полосы водяного знака
-    for start_y in range(-height, height * 2, 180):
-        # Создаем временное холст для отдельной диагональной строки текста, чтобы повернуть её
-        line_img = Image.new('RGBA', (width * 2, 60), (0, 0, 0, 0))
-        line_draw = ImageDraw.Draw(line_img)
-        # Яркий, но прозрачный водяной знак (альфа 75 из 255), чтобы он пересекал текст и был виден везде
-        line_draw.text((20, 10), f"{watermark_str}     {watermark_str}     {watermark_str}", fill=(255, 255, 255, 75), font=font_watermark_diag)
-        
-        # Поворачиваем строку на -30 градусов (диагональ)
-        rotated_line = line_img.rotate(35, expand=1, resample=Image.Resampling.BICUBIC)
-        txt_layer.paste(rotated_line, (start_y - 200, start_y // 2), rotated_line)
+    for y in range(150, height - 120, 95):
+        for x in range(30, width, 320):
+            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 65), font=font_watermark)
 
-    # Композируем диагональную защиту на базовую картинку
     img_rgba = img.convert('RGBA')
     img_rgba = Image.alpha_composite(img_rgba, txt_layer)
 
@@ -460,7 +439,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             draw_comp.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 38
 
-    # ВЫЗОВ НАСТОЯЩЕЙ КРАСИВОЙ ПЕЧАТИ В ПРАВОМ НИЖНЕМ УГЛУ
+    # ВЫЗОВ ФИРМЕННОЙ ПЕЧАТИ В ПРАВОМ НИЖНЕМ УГЛУ
     draw_realistic_stamp(img_rgba, cx=width - 130, cy=height - 210, r=55)
 
     # Нижнее предупреждение о бане
@@ -695,7 +674,7 @@ async def select_item(call: CallbackQuery):
     USER_PENDING_PURCHASE[call.from_user.id] = item_info.get("name", "Прогноз")
 
     price_kz = item_info.get("price_kz", 1500)
-    stars = item_info.get("stars", 50)
+    stars = item_info.get("stars", 140)
     text = f"📦 **{item_info['name']}**\n💳 К оплате: {price_kz} ₸ или {stars} Telegram Stars ⭐"
     pay_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"💳 Kaspi Перевод ({price_kz} ₸)", callback_data=f"pay_kaspi_{item_code}")],
@@ -1028,6 +1007,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.main(main())
+        asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Бот остановлен.")
