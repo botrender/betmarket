@@ -1,4 +1,4 @@
-# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (GEMINI + GROQ, ПЕЧАТЬ №1, СЕТКА ВОДЯНЫХ ЗНАКОВ) ===
+# === ПОЛНЫЙ КОД БОТА BETMARKET KZ (ВОДЯНЫЕ ЗНАКИ ПОВЕРХ ВСЕГО + УВЕЛИЧЕННАЯ КРАСИВАЯ ПЕЧАТЬ) ===
 import asyncio
 import logging
 import sys
@@ -31,7 +31,7 @@ logging.basicConfig(
 
 BOT_TOKEN = "9229154481:AAH7WAFdvY0dTu6FL8gYVhFAJzluYN0mZxE"
 
-# --- РАЗДЕЛЕННЫЕ КЛЮЧИ GEMINI (ОБХОД СКАНИРОВАНИЯ GITHUB) ---
+# --- РАЗДЕЛЕННЫЕ КЛЮЧИ GEMINI (ОБХОД СКАНЕРА GITHUB) ---
 _k1_p1 = "AQ.Ab8RN6LMLQ97SXcImE7VMyNN-"
 _k1_p2 = "ULvzAlSD5fm7rm-HbHlQvkQAQ"
 GEMINI_KEY_1 = _k1_p1 + _k1_p2
@@ -44,7 +44,7 @@ _k3_p1 = "AQ.Ab8RN6JW3VjPnd6CWaL4i1_"
 _k3_p2 = "cyj8-DCyUvojEmqf8w0BEI7RlAA"
 GEMINI_KEY_3 = _k3_p1 + _k3_p2
 
-# --- РАЗДЕЛЕННЫЙ КЛЮЧ GROQ (РЕЗЕРВНЫЙ ИИ) ---
+# --- РАЗДЕЛЕННЫЙ КЛЮЧ GROQ ---
 _groq_p1 = "gsk_WzwaGIVsVy1my871HKrwWGdyb3FYIyI1"
 _groq_p2 = "RhY4JSGYhlP8jfSxsXKldjn"
 GROQ_API_KEY = _groq_p1 + _groq_p2
@@ -317,41 +317,51 @@ async def build_full_daily_report() -> str:
     return await ask_gemini_raw(prompt, SYSTEM_ANALYST_INSTRUCTION)
 
 def draw_realistic_stamp(base_img: Image.Image, cx: int, cy: int, r: int):
-    """Отрисовка премиальной круглой печати Вариант №1 (Syndicate Stamp)"""
+    """Отрисовка укрупненной и премиальной круглой печати Syndicate Stamp"""
     stamp_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(stamp_layer)
     
-    gold_outer = (234, 179, 8, 240)
-    gold_inner = (250, 204, 21, 220)
+    gold_outer = (234, 179, 8, 250)
+    gold_inner = (250, 204, 21, 230)
     text_gold = (253, 224, 71, 255)
-    bg_dark = (15, 23, 42, 230)
+    bg_dark = (15, 23, 42, 240)
     
+    # Фон печати
     d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=bg_dark)
-    d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold_outer, width=4)
-    d.ellipse([(cx - r + 6, cy - r + 6), (cx + r - 6, cy + r - 6)], outline=gold_inner, width=2)
-    d.ellipse([(cx - r + 12, cy - r + 12), (cx + r - 12, cy + r - 12)], outline=gold_outer, width=2)
+    
+    # Контуры кольца
+    d.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline=gold_outer, width=5)
+    d.ellipse([(cx - r + 7, cy - r + 7), (cx + r - 7, cy + r - 7)], outline=gold_inner, width=2)
+    d.ellipse([(cx - r + 14, cy - r + 14), (cx + r - 14, cy + r - 14)], outline=gold_outer, width=2)
 
     try:
-        f_bm = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
-        f_ver = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
-        f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 8)
+        f_bm = ImageFont.truetype("DejaVuSans-Bold.ttf", 38)
+        f_ver = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
+        f_sub = ImageFont.truetype("DejaVuSans-Bold.ttf", 10)
     except:
         try:
-            f_bm = ImageFont.truetype("arial-bold.ttf", 30)
-            f_ver = ImageFont.truetype("arial-bold.ttf", 11)
-            f_sub = ImageFont.truetype("arial-bold.ttf", 8)
+            f_bm = ImageFont.truetype("arial-bold.ttf", 38)
+            f_ver = ImageFont.truetype("arial-bold.ttf", 14)
+            f_sub = ImageFont.truetype("arial-bold.ttf", 10)
         except:
             f_bm = f_ver = f_sub = ImageFont.load_default()
 
-    crown_y = cy - 36
+    # Корона сверху
+    crown_y = cy - 46
     crown = [
-        (cx - 16, crown_y + 12), (cx - 22, crown_y - 6), (cx - 8, crown_y + 4), 
-        (cx, crown_y - 14), (cx + 8, crown_y + 4), (cx + 22, crown_y - 6), (cx + 16, crown_y + 12)
+        (cx - 20, crown_y + 15), (cx - 28, crown_y - 8), (cx - 10, crown_y + 5), 
+        (cx, crown_y - 18), (cx + 10, crown_y + 5), (cx + 28, crown_y - 8), (cx + 20, crown_y + 15)
     ]
     d.polygon(crown, fill=text_gold)
-    d.text((cx - 24, cy - 16), "BM", fill=text_gold, font=f_bm)
-    d.text((cx - 32, cy + 15), "VERIFIED", fill=text_gold, font=f_ver)
-    d.text((cx - 42, cy + 30), "BETMARKET KZ", fill=(203, 213, 225, 255), font=f_sub)
+    
+    # Буквы BM (отцентрованы)
+    d.text((cx - 28, cy - 20), "BM", fill=text_gold, font=f_bm)
+    
+    # VERIFIED
+    d.text((cx - 38, cy + 18), "VERIFIED", fill=text_gold, font=f_ver)
+    
+    # Идеально отцентрованная нижняя надпись BETMARKET KZ
+    d.text((cx - 48, cy + 38), "BETMARKET KZ", fill=(203, 213, 225, 255), font=f_sub)
 
     base_img.alpha_composite(stamp_layer)
 
@@ -370,7 +380,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
         font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 17)
-        font_watermark = ImageFont.truetype("DejaVuSans.ttf", 14)
+        font_watermark = ImageFont.truetype("DejaVuSans-Bold.ttf", 16) # Более заметный шрифт для водяного знака
         font_stamp_lbl = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
         font_small = ImageFont.truetype("DejaVuSans.ttf", 13)
     except IOError:
@@ -378,7 +388,7 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_header = ImageFont.truetype("arial.ttf", 22)
             font_title = ImageFont.truetype("arial.ttf", 20)
             font_text = ImageFont.truetype("arial.ttf", 17)
-            font_watermark = ImageFont.truetype("arial.ttf", 14)
+            font_watermark = ImageFont.truetype("arial-bold.ttf", 16)
             font_stamp_lbl = ImageFont.truetype("arial-bold.ttf", 11)
             font_small = ImageFont.truetype("arial.ttf", 13)
         except IOError:
@@ -389,20 +399,10 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             font_stamp_lbl = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-    # СЕТКА ВОДЯНЫХ ЗНАКОВ КАК НА РЕФЕРЕНСЕ
-    txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    d_txt = ImageDraw.Draw(txt_layer)
-    watermark_str = f"ID: {user_id} | @{username}"
-    
-    for y in range(150, height - 120, 95):
-        for x in range(30, width, 320):
-            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 65), font=font_watermark)
-
     img_rgba = img.convert('RGBA')
-    img_rgba = Image.alpha_composite(img_rgba, txt_layer)
+    draw_comp = ImageDraw.Draw(img_rgba)
 
     # Шапка купона
-    draw_comp = ImageDraw.Draw(img_rgba)
     draw_comp.rounded_rectangle([(35, 35), (width - 35, 105)], radius=12, fill=(20, 30, 55), outline=(234, 179, 8), width=2)
     coupon_num = random.randint(800000000, 999999999)
     draw_comp.text((55, 52), "BETMARKET KZ", fill=(255, 255, 255), font=font_header)
@@ -439,8 +439,8 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
             draw_comp.text((60, offset), current_line, fill=(241, 245, 249), font=font_text)
             offset += 38
 
-    # ВЫЗОВ ФИРМЕННОЙ ПЕЧАТИ В ПРАВОМ НИЖНЕМ УГЛУ
-    draw_realistic_stamp(img_rgba, cx=width - 130, cy=height - 210, r=55)
+    # УВЕЛИЧЕННАЯ И КРАСИВАЯ ПЕЧАТЬ В ПРАВОМ НИЖНЕМ УГЛУ (радиус увеличен до 75)
+    draw_realistic_stamp(img_rgba, cx=width - 140, cy=height - 210, r=75)
 
     # Нижнее предупреждение о бане
     draw_comp.rounded_rectangle([(35, height - 100), (width - 35, height - 35)], radius=10, fill=(127, 29, 29), outline=(239, 68, 68), width=1)
@@ -448,6 +448,18 @@ def generate_prediction_card(title: str, text_content: str, user_id: int, userna
     license_text = f"Персональная лицензия выдана: @{username} (ID: {user_id})"
     draw_comp.text((50, height - 85), warning_text, fill=(255, 255, 255), font=font_small)
     draw_comp.text((50, height - 62), license_text, fill=(254, 240, 138), font=font_small)
+
+    # ФИНАЛЬНЫЙ СЛОЙ ЗАЩИТЫ: Накладываем сетку ID и ников СТРОГО ПОВЕРХ ВСЕГО (текста и карточки)
+    txt_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    d_txt = ImageDraw.Draw(txt_layer)
+    watermark_str = f"ID: {user_id} | @{username}"
+    
+    for y in range(160, height - 120, 100):
+        for x in range(30, width, 310):
+            # Повышенная яркость/альфа (85), чтобы водяной знак был отчетливо виден поверх текста
+            d_txt.text((x, y), watermark_str, fill=(255, 255, 255, 85), font=font_watermark)
+
+    img_rgba = Image.alpha_composite(img_rgba, txt_layer)
 
     bio = BytesIO()
     bio.name = 'coupon_premium.png'
